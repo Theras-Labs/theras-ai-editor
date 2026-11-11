@@ -1,0 +1,4 @@
+# Bun 1.4 uses the isolated linker by default. 
+# Bun 1.3 (hoisted), and several packages import dependencies they do not list.
+[install]
+linker = "hoisted"

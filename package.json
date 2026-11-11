@@ -1,0 +1,50 @@
+{
+  "name": "theras-ai",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "bun@1.3.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "samples/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd apps/editor dev",
+    "dev:all": "bun run --filter '@theras/editor' --filter '@theras/three-runtime-playground' --filter '@theras/three-vanilla-playground' dev",
+    "start": "bun run --parallel start:orchestrator dev:server",
+    "start:orchestrator": "bun run --cwd apps/orchestrator dev",
+    "dev:server": "bun run --cwd server dev",
+    "start:server": "bun run --cwd server start",
+    "changeset": "changeset",
+    "build": "bun run --cwd apps/editor build",
+    "build:orchestrator": "bun run --cwd apps/orchestrator build",
+    "typecheck": "bun run --cwd apps/editor typecheck",
+    "typecheck:orchestrator": "bun run --cwd apps/orchestrator typecheck",
+    "dev:animation-editor": "bun run --cwd apps/animation-editor dev",
+    "build:animation-editor": "bun run --cwd apps/animation-editor build",
+    "typecheck:animation-editor": "tsc -p apps/animation-editor/tsconfig.json --noEmit",
+    "dev:vfx-editor": "bun run --cwd apps/vfx-editor dev",
+    "build:vfx-editor": "bun run --cwd apps/vfx-editor build",
+    "typecheck:vfx-editor": "tsc -p apps/vfx-editor/tsconfig.json --noEmit",
+    "build:packages": "bun ./scripts/release-packages.mjs build",
+    "version:packages": "changeset version",
+    "publish:packages:dry-run": "bun ./scripts/release-packages.mjs publish --dry-run",
+    "publish:packages": "bun ./scripts/release-packages.mjs publish",
+    "dev:three-runtime": "bun run --cwd apps/three-runtime-playground dev",
+    "build:three-runtime": "bun run --cwd apps/three-runtime-playground build",
+    "typecheck:three-runtime": "bun run --cwd apps/three-runtime-playground typecheck",
+    "dev:three-vanilla": "bun run --cwd apps/three-vanilla-playground dev",
+    "build:three-vanilla": "bun run --cwd apps/three-vanilla-playground build",
+    "typecheck:three-vanilla": "bun run --cwd apps/three-vanilla-playground typecheck"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.30.0",
+    "@types/node": "^24.10.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.2",
+    "three-mesh-bvh": "^0.9.2"
+  }
+}

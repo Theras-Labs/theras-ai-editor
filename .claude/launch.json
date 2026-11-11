@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "theras-orchestrator", "runtimeExecutable": "bun", "runtimeArgs": ["run", "start"], "port": 4300 },
+    { "name": "theras-editor", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 8080 }
+  ]
+}
