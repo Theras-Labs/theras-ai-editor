@@ -145,7 +145,7 @@ Press Play (Mod+P) to walk the scene in first or third person with physics. Only
 
 ## Hosted demo and its AI quota
 
-The hosted demo is at https://theras-editor-production.up.railway.app. Its AI (GPT-5.6 Luna) uses
+The hosted demo is at https://theras-editor-demo-production.up.railway.app. Its AI (GPT-5.6 Luna) uses
 the project's own API key, so it has a free quota per UTC day: 10 prompts for each visitor
 (by IP address) and 200 prompts for all visitors together. One prompt is one message to
 Ask Theras, with all of its model steps. When the quota is used up, the editor says so; the
