@@ -12,6 +12,7 @@ import { chatCompat, streamCompat } from "./openai-compat";
 import { admitPrompt, checkRate, promptsLeft } from "./rate-limit";
 import { projectRoutesEnabled, readProjectFile, scanProject } from "./projects";
 import { EFFORTS, UpstreamError, type ChatRequest, type ChatResult, type StreamEmit, type StreamEvent } from "./wire";
+import { loadAssetIndex, searchAssets } from "./assets";
 
 const PORT = Number(process.env.PORT) || 4310;
 const HOST = process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
@@ -19,6 +20,8 @@ const UPSTREAM_TIMEOUT_MS = 180_000;
 const MAX_MESSAGES = 600;
 const MAX_TOOLS = 200;
 const PING_AFTER_MS = 15_000;
+/** External assets (scanned objects): read one time here, searched in memory by /api/assets/search. */
+const assetIndex = loadAssetIndex();
 
 const localOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 function originAllowed(origin: string | null): boolean {
@@ -256,6 +259,22 @@ const app = new Elysia()
     }
     return new Response(file.body, { headers: { "content-type": file.type, "cache-control": "no-cache" } });
   })
+  // External assets: a search of the index in memory. No request goes to the source host from here.
+  .get("/api/assets/search", ({ request, query, set }) => {
+    if (allowedOrigins.length > 0 && !originAllowed(request.headers.get("origin"))) {
+      set.status = 403;
+      return { error: "Origin not allowed" };
+    }
+    const q = typeof query.q === "string" ? query.q.slice(0, 200) : "";
+    const { words, hits } = searchAssets(assetIndex.assets, q, Number(query.limit) || 12);
+    return {
+      dataset: assetIndex.dataset,
+      revision: assetIndex.revision,
+      total: assetIndex.assets.length,
+      words,
+      results: hits.map((h) => ({ ...h.asset, score: h.score, matched: h.matched }))
+    };
+  })
   .get("/api/ai/config", ({ request, server }) => ({ ...publicConfig(), promptsLeft: promptsLeft(clientIp(request, server), promptQuota) }))
   .put("/api/admin/ai", ({ request, body, set }) => {
     if (!adminToken) {
@@ -406,6 +425,6 @@ const app = new Elysia()
   .listen({ port: PORT, hostname: HOST, idleTimeout: 255, maxRequestBodySize: 12 * 1024 * 1024 });
 
 const cfg = publicConfig();
-console.log(`[theras-server] http://${HOST}:${PORT}  provider=${cfg.provider} model=${cfg.model} ready=${cfg.ready} admin=${cfg.adminEnabled}`);
+console.log(`[theras-server] http://${HOST}:${PORT}  provider=${cfg.provider} model=${cfg.model} ready=${cfg.ready} admin=${cfg.adminEnabled} assets=${assetIndex.assets.length}`);
 
 export type App = typeof app;
