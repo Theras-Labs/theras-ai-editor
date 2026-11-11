@@ -22,6 +22,8 @@ export type ComposeParams = {
   environment?: string;
   /** Water surface id (kind water). */
   water?: string;
+  /** Land id (kind terrain, for example lh:terrain:island). Built first; the items stand on it. */
+  terrain?: string;
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -80,7 +82,11 @@ export function validateCompose(params: Record<string, unknown>): ComposeParams 
       out.water ??= entry.id;
       continue;
     }
-    if (entry.kind === "terrain") continue;
+    if (entry.kind === "terrain") {
+      // New land (an island): built before the items, which then stand on it.
+      out.terrain ??= entry.id;
+      continue;
+    }
     const item: ComposeItem = { id: entry.id };
     if (typeof raw.count === "number" && Number.isFinite(raw.count)) item.count = Math.min(LAYOUT_MAX_COUNT, Math.max(1, Math.floor(raw.count)));
     if (isRecord(raw.layout) && typeof raw.layout.pattern === "string" && (LAYOUT_PATTERNS as string[]).includes(raw.layout.pattern)) {
@@ -89,7 +95,9 @@ export function validateCompose(params: Record<string, unknown>): ComposeParams 
     if (typeof raw.seed === "number") item.seed = raw.seed;
     out.items.push(item);
   }
-  if (out.items.length === 0 && !out.environment && !out.water) {
+  const land = typeof params.terrain === "string" ? getResource(params.terrain) : undefined;
+  if (land && land.kind === "terrain") out.terrain ??= land.id;
+  if (out.items.length === 0 && !out.environment && !out.water && !out.terrain) {
     return dropped.length ? `No library entry for ${dropped.slice(0, 4).join(", ")}.` : "No library objects to place.";
   }
   return out;
@@ -197,7 +205,7 @@ export function applyComposeAnswers(params: ComposeParams, answers: ChoiceAnswer
 // ── The generator ─────────────────────────────────────────────
 
 export const COMPOSE_DESCRIBE =
-  'Library objects placed by code (terrain height, spacing, no overlap). params {folder?: string, items: [{id: library id, count?: 1-24, layout?: {pattern: "single"|"cluster"|"ring"|"row"|"scatter"|"shore"|"path", anchor?: node id|"camera"|"selection", to?: node id, radius?: m, facing?: "anchor"|"away"|"random"|"along"}}], environment?: sky id (lh:sky:*), water?: water id (water:*)}. For props, plants, landmarks, camps, gardens, harbors and the vegetation of a scene.';
+  'Library objects placed by code (terrain height, spacing, no overlap). params {folder?: string, items: [{id: library id, count?: 1-24, layout?: {pattern: "single"|"cluster"|"ring"|"row"|"scatter"|"shore"|"path", anchor?: node id|"camera"|"selection", to?: node id, radius?: m, facing?: "anchor"|"away"|"random"|"along"}}], environment?: sky id (lh:sky:*), water?: water id (water:*), terrain?: land id (lh:terrain:island)}. An island or new land = terrain lh:terrain:island (code builds it first; items without an anchor stand on it). For props, plants, landmarks, camps, gardens, harbors and the vegetation of a scene.';
 
 function nameOf(id: string) {
   return getResource(id)?.name ?? id;
@@ -236,6 +244,24 @@ export const composeGenerator: Generator = {
         ctx.step("Sky", nameOf(params.environment));
         done.push(`the ${nameOf(params.environment)} sky`);
         if (Array.isArray(res.nodeIds)) nodeIds.push(...(res.nodeIds as string[]));
+      }
+    }
+
+    // New land first, so that the items stand on it. A scene with land keeps its land.
+    if (params.terrain) {
+      if (terrainCenter(ctx.editor)) skipped.push(`${nameOf(params.terrain)}: the scene already has land`);
+      else {
+        const res = parseResult(await executeWithReveal(ctx.editor, "place_resource", { id: params.terrain, x: ctx.anchor.x, y: 0, z: ctx.anchor.z }));
+        if (res.success === false) skipped.push(`${nameOf(params.terrain)}: ${String(res.error)}`);
+        else {
+          ctx.step("Land", nameOf(params.terrain));
+          done.push(nameOf(params.terrain).toLowerCase());
+          if (Array.isArray(res.nodeIds)) nodeIds.push(...(res.nodeIds as string[]));
+          // The viewport builds the terrain mesh on its next frames; the layout needs its
+          // ground heights. Wait for it (at most 3 s, client only, no server call).
+          const { terrainNodeIds } = await import("@/lib/resources/terrain-edit");
+          for (let i = 0; i < 30 && terrainNodeIds().length === 0; i++) await ctx.pause(100);
+        }
       }
     }
 
@@ -279,12 +305,23 @@ export const composeGenerator: Generator = {
       }
       return undefined;
     };
+    // Where things go when the brief names no usable anchor: what the task before built, else
+    // the land of the scene (things stand on the island), else the director's anchor.
+    const land = terrainCenter(ctx.editor);
+    const fallback = () => lastBuilt() ?? (land ? { x: land.x, z: land.z } : { x: ctx.anchor.x, z: ctx.anchor.z });
+    // A sky is not a place: the director may name the sky node it just set ("around the
+    // environment"). Such an anchor means the default place.
+    const isSky = (id: string) => {
+      const node = ctx.editor.scene.getNode(id);
+      const res = typeof node?.metadata?.resource === "string" ? getResource(node.metadata.resource) : undefined;
+      return node?.metadata?.environment === true || res?.kind === "sky" || res?.kind === "hdri";
+    };
     const resolveAnchor = (anchor: unknown): unknown => {
       if (typeof anchor !== "string" || anchor === "camera" || anchor === "origin" || anchor === "selection") return anchor;
       const ref = /^@(\d+)$/.exec(anchor);
-      if (ref) return builtAnchor(Number(ref[1]) - 1) ?? lastBuilt() ?? { x: ctx.anchor.x, z: ctx.anchor.z };
-      if (sceneIds.has(anchor)) return anchor;
-      return lastBuilt() ?? { x: ctx.anchor.x, z: ctx.anchor.z };
+      if (ref) return builtAnchor(Number(ref[1]) - 1) ?? fallback();
+      if (sceneIds.has(anchor) && !isSky(anchor)) return anchor;
+      return fallback();
     };
     const items = applyComposeAnswers(params, answers).map((item) => ({
       ...item,
@@ -293,7 +330,7 @@ export const composeGenerator: Generator = {
       layout: {
         pattern: "cluster",
         ...item.layout,
-        anchor: item.layout?.anchor !== undefined ? resolveAnchor(item.layout.anchor) : (lastBuilt() ?? { x: ctx.anchor.x, z: ctx.anchor.z }),
+        anchor: item.layout?.anchor !== undefined ? resolveAnchor(item.layout.anchor) : fallback(),
         ...(item.layout?.to !== undefined ? { to: resolveAnchor(item.layout.to) } : {})
       }
     }));
