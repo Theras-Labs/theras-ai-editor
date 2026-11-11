@@ -1,0 +1,30 @@
+{
+  "name": "@theras/three-vanilla-playground",
+  "private": true,
+  "version": "0.0.4",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "bun x vite",
+    "build": "bun x tsc --noEmit && bun x vite build --config vite.config.ts",
+    "typecheck": "bun x tsc --noEmit",
+    "preview": "bun x vite preview"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.2",
+    "@theras/gameplay-runtime": "workspace:*",
+    "@theras/render-pipeline": "workspace:*",
+    "@theras/runtime-audio": "workspace:*",
+    "@theras/runtime-physics-rapier": "workspace:*",
+    "@theras/shared": "workspace:*",
+    "@theras/three-runtime": "workspace:*",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/three": "^0.183.1",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}
