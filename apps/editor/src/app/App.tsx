@@ -1,0 +1,741 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSnapshot } from "valtio";
+import { gameControlsActive, gameStore, playerPose } from "@/lib/game/game-store";
+import { placeResource } from "@/lib/resources/place";
+import {
+  createReplaceNodesCommand,
+  createSceneEditorAdapter,
+  createSceneDocumentSnapshot,
+  createSeedSceneDocument,
+  createWorldEditorCore,
+  type SceneSpatialAnalysis,
+  type WorldPersistenceBundle
+} from "@theras/editor-core";
+import { createDerivedRenderSceneCache, deriveRenderSceneCached } from "@theras/render-pipeline";
+import {
+  isModelNode,
+  isPrimitiveNode,
+  type Asset,
+  type GeometryNode,
+  type TextureRecord,
+} from "@theras/shared";
+import { createWorkerTaskManager, type WorkerJob } from "@theras/workers";
+import { slugifyProjectName } from "@theras/dev-sync";
+import { WorldEditorShell } from "@/components/WorldEditorShell";
+import { EditorActionDomainsProvider } from "@/app/editor-action-domains";
+import { useAppHotkeys } from "@/app/hooks/useAppHotkeys";
+import { useAssetMaterialActions } from "@/app/hooks/useAssetMaterialActions";
+import { useCopilot } from "@/app/hooks/useCopilot";
+import { useEditorSubscriptions } from "@/app/hooks/useEditorSubscriptions";
+import { useExportWorker } from "@/app/hooks/useExportWorker";
+import { useGameConnection } from "@/app/hooks/useGameConnection";
+import { useProjectTransferActions } from "@/app/hooks/useProjectTransferActions";
+import { useSceneDraftPersistence } from "@/app/hooks/useSceneDraftPersistence";
+import { useSceneMutationActions } from "@/app/hooks/useSceneMutationActions";
+import { useWorldDocumentManagement } from "@/app/hooks/useWorldDocumentManagement";
+import { GameConnectionControl } from "@/components/editor-shell/GameConnectionControl";
+import { convertPrimitiveNodeToMeshNode } from "@/lib/primitive-to-mesh";
+import { buildModelAssetLibrary } from "@/lib/model-assets";
+import { resolveEffectiveSceneItemIds } from "@/lib/scene-hierarchy";
+import { uiStore } from "@/state/ui-store";
+import { toggleAskTheras } from "@/state/ask-theras";
+import { frameForSite, largestTarget } from "@/lib/copilot/frame-site";
+import { setSceneBridge } from "@/lib/saved-scenes";
+import { readSites } from "@/lib/copilot/director/site";
+import { vec3 } from "@theras/shared";
+import { projectSessionStore } from "@/state/project-session-store";
+import { sceneSessionStore } from "@/state/scene-session-store";
+import { toolSessionStore } from "@/state/tool-session-store";
+
+const EMPTY_SCENE_SPATIAL_ANALYSIS: SceneSpatialAnalysis = {
+  connectorValidations: [],
+  elevationBands: [],
+  groups: [],
+  issues: [],
+  nodes: [],
+  walkableSurfaces: []
+};
+
+const MODEL_ASSET_LIBRARY_NEUTRAL_REASONS = new Set([
+  "command:assign material",
+  "command:create material",
+  "command:create texture",
+  "command:delete material",
+  "command:delete texture",
+  "command:group selection",
+  "command:paint instances",
+  "command:set brush",
+  "command:set entity",
+  "command:set mesh",
+  "command:set mesh material layers",
+  "command:set scene settings",
+  "command:set transform",
+  "command:translate selection",
+  "command:update material",
+  "command:update texture"
+]);
+
+function isModelAssetLibraryNeutralChange(reason: string) {
+  if (MODEL_ASSET_LIBRARY_NEUTRAL_REASONS.has(reason)) {
+    return true;
+  }
+
+  if (reason.startsWith("command:clip ") || reason.startsWith("command:extrude ") || reason.startsWith("command:mirror ")) {
+    return true;
+  }
+
+  return reason.startsWith("command:place ") && reason !== "command:place asset";
+}
+
+function createModelAssetLibrarySignature(assets: Iterable<Asset>, nodes: Iterable<GeometryNode>) {
+  const parts: string[] = [];
+
+  for (const asset of assets) {
+    if (asset.type !== "model") {
+      continue;
+    }
+
+    parts.push(
+      asset.id,
+      asset.path,
+      typeof asset.metadata.modelFiles === "string" ? asset.metadata.modelFiles : "",
+      typeof asset.metadata.modelFormat === "string" ? asset.metadata.modelFormat : "",
+      typeof asset.metadata.name === "string" ? asset.metadata.name : "",
+      typeof asset.metadata.source === "string" ? asset.metadata.source : ""
+    );
+  }
+
+  parts.push("\u0000");
+
+  for (const node of nodes) {
+    if (!isModelNode(node)) {
+      continue;
+    }
+
+    parts.push(node.id, node.data.assetId);
+  }
+
+  return parts.join("\u0001");
+}
+
+export function App() {
+  const [worldEditor] = useState(() => createWorldEditorCore(createSceneDocumentSnapshot(createSeedSceneDocument())));
+  const [editor] = useState(() => createSceneEditorAdapter(worldEditor));
+  const [workerManager] = useState(() => createWorkerTaskManager());
+  const [workerJobs, setWorkerJobs] = useState<WorkerJob[]>([]);
+  const [committedSceneRevision, setCommittedSceneRevision] = useState(0);
+  const [modelAssetRevision, setModelAssetRevision] = useState(0);
+  const [sceneRevision, setSceneRevision] = useState(0);
+  const [selectionRevision, setSelectionRevision] = useState(0);
+  const [worldRevision, setWorldRevision] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sceneDocumentInputRef = useRef<HTMLInputElement | null>(null);
+  const glbImportInputRef = useRef<HTMLInputElement | null>(null);
+  const modelLodInputRef = useRef<HTMLInputElement | null>(null);
+  const renderSceneCacheRef = useRef(createDerivedRenderSceneCache());
+  const modelAssetSignatureRef = useRef("");
+  const toolSessionSnapshot = useSnapshot(toolSessionStore);
+  // The player has the keys (game mode, playing, editor tools not shown).
+  const gamePlaying = gameControlsActive(useSnapshot(gameStore));
+  const projectSessionSnapshot = useSnapshot(projectSessionStore);
+  const sceneSessionSnapshot = useSnapshot(sceneSessionStore);
+  const activeToolId = toolSessionSnapshot.activeToolId;
+  const aiModelDraft = toolSessionSnapshot.aiModelDraft;
+  const physicsPlayback = toolSessionSnapshot.physicsPlayback;
+  const projectName = projectSessionSnapshot.projectName;
+  const projectSlug = projectSessionSnapshot.projectSlug;
+  const projectSlugDirty = projectSessionSnapshot.projectSlugDirty;
+  const hiddenSceneItemIds = sceneSessionSnapshot.hiddenSceneItemIds;
+  const lockedSceneItemIds = sceneSessionSnapshot.lockedSceneItemIds;
+  const selectedScenePathId = sceneSessionSnapshot.selectedScenePathId;
+  const { downloadBinaryFile, downloadTextFile, exportJobs, runWorkerRequest } = useExportWorker();
+  const gameConnection = useGameConnection();
+  const workingSet = useMemo(() => worldEditor.getWorkingSet(), [worldEditor, worldRevision]);
+  const activeWorldDocumentId = workingSet.activeDocumentId;
+  const flattenedWorldSnapshot = useMemo(
+    () =>
+      workingSet.mode === "world"
+        ? worldEditor.getFlattenedSceneSnapshot({
+            activeDocumentId: activeWorldDocumentId,
+            activeDocumentOverride: editor.scene,
+            includeLoadedOnly: true
+          })
+        : null,
+    [activeWorldDocumentId, editor, sceneRevision, worldEditor, workingSet.mode, worldRevision]
+  );
+  const renderScene = useMemo(
+    () =>
+      deriveRenderSceneCached(
+        workingSet.mode === "world" && flattenedWorldSnapshot
+          ? flattenedWorldSnapshot.nodes
+          : editor.scene.nodes.values(),
+        workingSet.mode === "world" && flattenedWorldSnapshot
+          ? flattenedWorldSnapshot.entities
+          : editor.scene.entities.values(),
+        workingSet.mode === "world" && flattenedWorldSnapshot
+          ? flattenedWorldSnapshot.materials
+          : editor.scene.materials.values(),
+        workingSet.mode === "world" && flattenedWorldSnapshot
+          ? flattenedWorldSnapshot.assets
+          : editor.scene.assets.values(),
+        renderSceneCacheRef.current,
+        workingSet.mode === "world" && flattenedWorldSnapshot
+          ? flattenedWorldSnapshot.textures
+          : editor.scene.textures.values()
+      ),
+    [editor, flattenedWorldSnapshot, sceneRevision, workingSet.mode]
+  );
+  const spatialAnalysis = EMPTY_SCENE_SPATIAL_ANALYSIS;
+  const sceneNodes = useMemo(() => Array.from(editor.scene.nodes.values()), [editor, committedSceneRevision]);
+  const sceneEntities = useMemo(() => Array.from(editor.scene.entities.values()), [editor, committedSceneRevision]);
+  const modelAssets = useMemo(
+    () => buildModelAssetLibrary(editor.scene.assets.values(), editor.scene.nodes.values()),
+    [editor, modelAssetRevision]
+  );
+  const sceneItemIdSet = useMemo(
+    () => new Set<string>([...sceneNodes.map((node) => node.id), ...sceneEntities.map((entity) => entity.id)]),
+    [sceneEntities, sceneNodes]
+  );
+  const effectiveHiddenSceneItemIds = useMemo(
+    () => resolveEffectiveSceneItemIds(sceneNodes, sceneEntities, hiddenSceneItemIds),
+    [hiddenSceneItemIds, sceneEntities, sceneNodes]
+  );
+  const effectiveLockedSceneItemIds = useMemo(
+    () => resolveEffectiveSceneItemIds(sceneNodes, sceneEntities, lockedSceneItemIds),
+    [lockedSceneItemIds, sceneEntities, sceneNodes]
+  );
+  const blockedSceneItemIdSet = useMemo(
+    () => new Set<string>([...effectiveHiddenSceneItemIds, ...effectiveLockedSceneItemIds]),
+    [effectiveHiddenSceneItemIds, effectiveLockedSceneItemIds]
+  );
+  const resolvedProjectName = projectName.trim() || "Untitled Scene";
+  const resolvedProjectSlug = slugifyProjectName(projectSlug.trim() || resolvedProjectName);
+  const texturesRef = useRef<TextureRecord[]>([]);
+
+  if (modelAssetSignatureRef.current.length === 0) {
+    modelAssetSignatureRef.current = createModelAssetLibrarySignature(editor.scene.assets.values(), editor.scene.nodes.values());
+  }
+
+  useEditorSubscriptions(editor, setSceneRevision, setCommittedSceneRevision, setSelectionRevision);
+
+  useEffect(() => {
+    const unsubscribeScene = editor.events.on("scene:changed", ({ reason }) => {
+      if (isModelAssetLibraryNeutralChange(reason)) {
+        return;
+      }
+
+      const nextSignature = createModelAssetLibrarySignature(editor.scene.assets.values(), editor.scene.nodes.values());
+
+      if (nextSignature === modelAssetSignatureRef.current) {
+        return;
+      }
+
+      modelAssetSignatureRef.current = nextSignature;
+      setModelAssetRevision((revision) => revision + 1);
+    });
+
+    return unsubscribeScene;
+  }, [editor]);
+
+  useEffect(() => workerManager.subscribe(setWorkerJobs), [workerManager]);
+
+  useEffect(() => worldEditor.events.on("world:changed", () => setWorldRevision((revision) => revision + 1)), [worldEditor]);
+
+  useEffect(() => {
+    const filterValidIds = (currentIds: string[]) => {
+      const nextIds = currentIds.filter((id) => sceneItemIdSet.has(id));
+      return nextIds.length === currentIds.length ? currentIds : nextIds;
+    };
+
+    sceneSessionStore.hiddenSceneItemIds = filterValidIds(sceneSessionStore.hiddenSceneItemIds);
+    sceneSessionStore.lockedSceneItemIds = filterValidIds(sceneSessionStore.lockedSceneItemIds);
+  }, [sceneItemIdSet]);
+
+  useEffect(() => {
+    if (editor.selection.ids.length === 0) {
+      return;
+    }
+
+    const nextSelection = editor.selection.ids.filter((id) => !blockedSceneItemIdSet.has(id));
+
+    if (nextSelection.length === editor.selection.ids.length) {
+      return;
+    }
+
+    editor.select(nextSelection, "object");
+  }, [blockedSceneItemIdSet, editor, selectionRevision]);
+
+  useEffect(() => {
+    if (!aiModelDraft) {
+      return;
+    }
+
+    const node = editor.scene.getNode(aiModelDraft.nodeId);
+
+    if (node && !isModelNode(node)) {
+      return;
+    }
+
+    toolSessionStore.aiModelDraft = null;
+    toolSessionStore.aiModelPlacementArmed = false;
+  }, [aiModelDraft, committedSceneRevision, editor]);
+
+  useEffect(() => {
+    if (uiStore.selectedAssetId && !editor.scene.assets.has(uiStore.selectedAssetId)) {
+      uiStore.selectedAssetId = "";
+    }
+  }, [committedSceneRevision, editor]);
+
+  useEffect(() => {
+    const scenePaths = editor.scene.settings.paths ?? [];
+
+    if (scenePaths.length === 0) {
+      sceneSessionStore.selectedScenePathId = undefined;
+      return;
+    }
+
+    if (!selectedScenePathId || !scenePaths.some((pathDefinition) => pathDefinition.id === selectedScenePathId)) {
+      sceneSessionStore.selectedScenePathId = scenePaths[0]?.id;
+    }
+  }, [committedSceneRevision, editor, selectedScenePathId]);
+
+  const syncEditorFromWorld = (reason: string) => {
+    editor.syncFromWorld(reason);
+    const nextModelAssetSignature = createModelAssetLibrarySignature(editor.scene.assets.values(), editor.scene.nodes.values());
+
+    if (nextModelAssetSignature !== modelAssetSignatureRef.current) {
+      modelAssetSignatureRef.current = nextModelAssetSignature;
+      setModelAssetRevision((revision) => revision + 1);
+    }
+
+    setWorldRevision((revision) => revision + 1);
+    setSceneRevision((revision) => revision + 1);
+    setCommittedSceneRevision((revision) => revision + 1);
+    setSelectionRevision((revision) => revision + 1);
+  };
+
+  const enqueueWorkerJob = (label: string, task: WorkerJob["task"], durationMs?: number) => {
+    workerManager.enqueue(task, label, durationMs);
+  };
+
+  useEffect(() => {
+    if (activeToolId !== "mesh-edit") {
+      toolSessionStore.sculptMode = null;
+      return;
+    }
+
+    const selectedNodeId = editor.selection.ids[0];
+    const selectedNode = selectedNodeId ? editor.scene.getNode(selectedNodeId) : undefined;
+
+    if (!selectedNode || !isPrimitiveNode(selectedNode) || selectedNode.data.role !== "prop") {
+      return;
+    }
+
+    editor.execute(
+      createReplaceNodesCommand(
+        editor.scene,
+        [convertPrimitiveNodeToMeshNode(selectedNode)],
+        "promote prop to mesh"
+      )
+    );
+  }, [activeToolId, committedSceneRevision, editor, selectionRevision]);
+
+  const buildActiveSceneSnapshot = () => ({
+    ...editor.exportSnapshot(),
+    metadata: {
+      projectName: resolvedProjectName,
+      projectSlug: resolvedProjectSlug
+    }
+  });
+
+  const buildWorldBundle = (): WorldPersistenceBundle => {
+    const bundle = worldEditor.getBundleRef();
+
+    return {
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        activeDocumentId: worldEditor.getWorkingSet().activeDocumentId,
+        metadata: {
+          projectName: resolvedProjectName,
+          projectSlug: resolvedProjectSlug
+        }
+      }
+    };
+  };
+
+  const buildSceneDraftPayload = () => ({
+    projectName: resolvedProjectName,
+    projectSlug: resolvedProjectSlug,
+    projectSlugDirty,
+    snapshot: buildWorldBundle(),
+    updatedAt: Date.now(),
+    version: 2 as const
+  });
+
+  const draftHydrated = useSceneDraftPersistence({
+    buildDraft: buildSceneDraftPayload,
+    onRestoreDraft: (draft) => {
+      worldEditor.importBundle(draft.snapshot, "world:restore-draft");
+      syncEditorFromWorld("world:restore-draft");
+      // A draft does not keep the view. The start view must not be inside something a generator
+      // built (a city around the origin): show the largest built thing.
+      const built = largestTarget(readSites(editor).map((s) => ({ center: s.facts.center, rect: s.facts.rect, height: s.facts.height })));
+      if (built) {
+        for (const viewport of Object.values(uiStore.viewports)) {
+          if (viewport.projection !== "perspective") continue;
+          const pose = frameForSite(viewport.camera, built);
+          if (!pose) continue;
+          viewport.camera.target = vec3(pose.target.x, pose.target.y, pose.target.z);
+          viewport.camera.position = vec3(pose.position.x, pose.position.y, pose.position.z);
+        }
+      }
+      projectSessionStore.projectName = draft.projectName || "Untitled Scene";
+      projectSessionStore.projectSlug = slugifyProjectName(draft.projectSlug || draft.projectName || "Untitled Scene");
+      projectSessionStore.projectSlugDirty = draft.projectSlugDirty;
+    },
+    saveKey: `${committedSceneRevision}:${projectSlugDirty ? 1 : 0}:${resolvedProjectName}:${resolvedProjectSlug}`
+  }).draftHydrated;
+
+  const {
+    createBrush,
+    instanceSelection,
+    physicsActions,
+    placementActions: scenePlacementActions,
+    sceneActions,
+    selectionActions
+  } = useSceneMutationActions({
+    activeWorldDocumentId,
+    blockedSceneItemIdSet,
+    bumpSceneRevision: () => {
+      setSceneRevision((revision) => revision + 1);
+    },
+    editor,
+    enqueueWorkerJob,
+    renderScene,
+    syncEditorFromWorld,
+    workingSet,
+    worldEditor
+  });
+
+  const {
+    aiActions,
+    assetActions,
+    fileInputHandlers: assetFileInputHandlers,
+    placementActions: assetPlacementActions
+  } = useAssetMaterialActions({
+    editor,
+    enqueueWorkerJob,
+    focusNode: selectionActions.focusNode,
+    glbImportInputRef,
+    modelAssets,
+    modelLodInputRef,
+    runWorkerRequest
+  });
+
+  const {
+    fileActions: baseFileActions,
+    fileInputHandlers: projectFileInputHandlers,
+    gameSyncActions
+  } = useProjectTransferActions({
+    buildActiveSceneSnapshot,
+    buildWorldBundle,
+    createBrush,
+    downloadBinaryFile,
+    downloadTextFile,
+    editor,
+    fileInputRef,
+    gameConnection,
+    resolvedProjectName,
+    resolvedProjectSlug,
+    runWorkerRequest,
+    sceneDocumentInputRef,
+    syncEditorFromWorld,
+    workingSet,
+    worldEditor
+  });
+
+  const handleUndo = () => {
+    editor.undo();
+  };
+
+  const handleRedo = () => {
+    editor.redo();
+  };
+
+  const requestScenePush = useEventCallback((options?: Parameters<typeof gameSyncActions.handlePushSceneToGame>[0]) => {
+    void gameSyncActions.handlePushSceneToGame(options).catch(() => {});
+  });
+  const handleProjectNameChange = useEventCallback(gameSyncActions.handleProjectNameChange);
+  const handleProjectSlugChange = useEventCallback(gameSyncActions.handleProjectSlugChange);
+  const handleRefreshGames = useEventCallback(gameConnection.refresh);
+  const handleSelectGame = useEventCallback(gameConnection.setSelectedGameId);
+  const handlePushScene = useCallback((forceSwitch?: boolean) => {
+    requestScenePush({ forceSwitch });
+  }, [requestScenePush]);
+  const copilotToolContext = useMemo(
+    () => ({
+      requestScenePush
+    }),
+    [requestScenePush]
+  );
+  const copilot = useCopilot(editor, copilotToolContext);
+
+  // Cmd+L: shows the text prompt or hides it (never the voice orb alone; see state/ask-theras.ts).
+  const handleToggleCopilot = toggleAskTheras;
+
+  // Test handle for local runs only: a test script can read the scene and move the camera.
+  useEffect(() => {
+    if (!/^(localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+\.localhost)$/.test(window.location.hostname)) return;
+    (window as unknown as { __therasDebug?: unknown }).__therasDebug = { editor, ui: uiStore, place: placeResource, game: gameStore, playerPose, project: projectSessionStore };
+  }, [editor]);
+
+  const handleToggleLogicViewer = () => {
+    uiStore.logicViewerOpen = !uiStore.logicViewerOpen;
+  };
+
+  const {
+    handleCreateWorldDocument,
+    handleLoadWorldDocument,
+    handlePinWorldDocument,
+    handleSetActiveWorldDocument,
+    handleSetWorldDocumentPosition,
+    handleSetWorldMode,
+    handleUnloadWorldDocument,
+    handleUnpinWorldDocument,
+    worldDocuments
+  } = useWorldDocumentManagement({
+    buildWorldBundle,
+    syncEditorFromWorld,
+    workingSet,
+    worldEditor,
+    worldRevision
+  });
+
+  useAppHotkeys({
+    activeToolId,
+    editor,
+    // While the player has the keys, editor hotkeys (tools, delete, nudge) are off.
+    enabled: physicsPlayback === "stopped" && !gamePlaying,
+    handleDeleteSelection: selectionActions.deleteSelection,
+    handleDuplicateSelection: selectionActions.duplicateSelection,
+    handleInstanceSelection: instanceSelection,
+    handleGroupSelection: selectionActions.groupSelection,
+    handleInvertSelectionNormals: selectionActions.invertSelectionNormals,
+    handleRedo,
+    handleToggleCopilot,
+    handleToggleLogicViewer,
+    handleTranslateSelection: selectionActions.translateSelection,
+    handleUndo,
+    setActiveToolId: (toolId) => {
+      toolSessionStore.activeToolId = toolId;
+    },
+    setMeshEditMode: (mode) => {
+      toolSessionStore.meshEditMode = mode;
+    },
+    setTransformMode: (mode) => {
+      toolSessionStore.transformMode = mode;
+    }
+  });
+
+  const history = {
+    canRedo: editor.commands.canRedo(),
+    canUndo: editor.commands.canUndo(),
+    redo: handleRedo,
+    undo: handleUndo
+  };
+  const placementActions = {
+    ...scenePlacementActions,
+    ...assetPlacementActions
+  };
+  const fileActions = {
+    ...baseFileActions,
+    importGlb: assetActions.importAsset
+  };
+  // The Scenes dialog (File > Scenes) saves and opens named scenes through this bridge.
+  setSceneBridge({
+    build: buildSceneDraftPayload,
+    restore: (draft, camera) => {
+      worldEditor.importBundle(draft.snapshot, "world:open-saved-scene");
+      syncEditorFromWorld("world:open-saved-scene");
+      editor.commands.clear();
+      const view = uiStore.viewports.perspective;
+      if (camera && view) {
+        view.camera.position = vec3(...camera.position);
+        view.camera.target = vec3(...camera.target);
+      }
+      projectSessionStore.projectName = draft.projectName || "Untitled Scene";
+      projectSessionStore.projectSlug = slugifyProjectName(draft.projectSlug || draft.projectName || "Untitled Scene");
+      projectSessionStore.projectSlugDirty = draft.projectSlugDirty;
+    },
+    nodeCount: () => editor.scene.nodes.size,
+    sceneName: () => resolvedProjectName,
+    saveFile: baseFileActions.saveWhmap,
+    openFile: baseFileActions.loadWhmap
+  });
+  const actionDomains = useMemo(
+    () => ({
+      aiActions,
+      assetActions,
+      fileActions,
+      history,
+      physicsActions,
+      placementActions,
+      sceneActions,
+      selectionActions
+    }),
+    [aiActions, assetActions, fileActions, history, physicsActions, placementActions, sceneActions, selectionActions]
+  );
+  const jobs = useMemo(() => [...workerJobs, ...exportJobs], [exportJobs, workerJobs]);
+  const textures = useMemo(() => {
+    const nextTextures = Array.from(editor.scene.textures.values());
+    const previousTextures = texturesRef.current;
+
+    if (areTextureArraysEqual(previousTextures, nextTextures)) {
+      return previousTextures;
+    }
+
+    texturesRef.current = nextTextures;
+    return nextTextures;
+  }, [committedSceneRevision, editor]);
+  const gameConnectionControl = useMemo(
+    () => (
+      <GameConnectionControl
+        activeGame={gameConnection.activeGame}
+        error={gameConnection.error}
+        games={gameConnection.games}
+        isLoading={gameConnection.isLoading}
+        isPushing={gameConnection.isPushing}
+        lastPush={gameConnection.lastPush}
+        onProjectNameChange={handleProjectNameChange}
+        onProjectSlugChange={handleProjectSlugChange}
+        onPushScene={handlePushScene}
+        onRefresh={handleRefreshGames}
+        onSelectGame={handleSelectGame}
+        projectName={projectName}
+        projectSlug={resolvedProjectSlug}
+        selectedGameId={gameConnection.selectedGameId}
+      />
+    ),
+    [
+      gameConnection.activeGame,
+      gameConnection.error,
+      gameConnection.games,
+      gameConnection.isLoading,
+      gameConnection.isPushing,
+      gameConnection.lastPush,
+      gameConnection.selectedGameId,
+      handleProjectNameChange,
+      handleProjectSlugChange,
+      handlePushScene,
+      handleRefreshGames,
+      handleSelectGame,
+      projectName,
+      resolvedProjectSlug
+    ]
+  );
+  const world = {
+    actions: {
+      createDocument: handleCreateWorldDocument,
+      loadDocument: handleLoadWorldDocument,
+      pinDocument: handlePinWorldDocument,
+      setActiveDocument: handleSetActiveWorldDocument,
+      setDocumentPosition: handleSetWorldDocumentPosition,
+      setWorldMode: handleSetWorldMode,
+      unloadDocument: handleUnloadWorldDocument,
+      unpinDocument: handleUnpinWorldDocument
+    },
+    documents: worldDocuments,
+    validationIssues: worldEditor.world.validation
+  };
+
+  return (
+    <>
+      <EditorActionDomainsProvider value={actionDomains}>
+        <WorldEditorShell
+          analysis={spatialAnalysis}
+          copilot={copilot}
+          gameConnectionControl={gameConnectionControl}
+          effectiveHiddenSceneItemIds={effectiveHiddenSceneItemIds}
+          effectiveLockedSceneItemIds={effectiveLockedSceneItemIds}
+          editor={editor}
+          jobs={jobs}
+          modelAssets={modelAssets}
+          renderScene={renderScene}
+          sceneSettings={editor.scene.settings}
+          textures={textures}
+          workingSet={workingSet}
+          world={world}
+        />
+      </EditorActionDomainsProvider>
+      <input
+        accept=".whmap,.json"
+        hidden
+        onChange={projectFileInputHandlers.handleWhmapFileChange}
+        ref={fileInputRef}
+        type="file"
+      />
+      <input
+        accept=".whdoc,.json"
+        hidden
+        multiple
+        onChange={projectFileInputHandlers.handleSceneDocumentFileChange}
+        ref={sceneDocumentInputRef}
+        type="file"
+      />
+      <input
+        accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json"
+        hidden
+        multiple
+        onChange={assetFileInputHandlers.handleGlbFileChange}
+        ref={glbImportInputRef}
+        type="file"
+      />
+      <input
+        accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json"
+        hidden
+        onChange={assetFileInputHandlers.handleAssetLodFileChange}
+        ref={modelLodInputRef}
+        type="file"
+      />
+    </>
+  );
+}
+
+function useEventCallback<T extends (...args: any[]) => unknown>(callback: T): T {
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
+}
+
+function areTextureArraysEqual(previous: TextureRecord[], next: TextureRecord[]) {
+  if (previous === next) {
+    return true;
+  }
+
+  if (previous.length !== next.length) {
+    return false;
+  }
+
+  return previous.every((texture, index) => {
+    const nextTexture = next[index];
+
+    return (
+      texture === nextTexture ||
+      (texture.id === nextTexture.id &&
+        texture.name === nextTexture.name &&
+        texture.kind === nextTexture.kind &&
+        texture.dataUrl === nextTexture.dataUrl &&
+        texture.mimeType === nextTexture.mimeType &&
+        texture.source === nextTexture.source &&
+        texture.prompt === nextTexture.prompt &&
+        texture.model === nextTexture.model &&
+        texture.createdAt === nextTexture.createdAt &&
+        texture.size === nextTexture.size)
+    );
+  });
+}
