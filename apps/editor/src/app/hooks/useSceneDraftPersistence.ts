@@ -1,5 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import { loadStoredSceneEditorDraft, saveSceneEditorDraft, type StoredSceneEditorDraft } from "@/lib/draft-storage";
+import {
+  loadNamedScene,
+  loadNamedSceneMeta,
+  loadStoredSceneEditorDraft,
+  pruneTabDrafts,
+  saveSceneEditorDraft,
+  type SavedSceneCamera,
+  type StoredSceneEditorDraft
+} from "@/lib/draft-storage";
+import { tabSession } from "@/lib/tab-session";
+
+/** "?scene=<saved id>" opens that saved scene in this tab (Scenes dialog: open in a new tab). */
+const SCENE_PARAM = "scene";
+
+async function sceneFromAddress(): Promise<{ draft: StoredSceneEditorDraft; camera?: SavedSceneCamera } | null> {
+  const url = new URL(window.location.href);
+  const id = url.searchParams.get(SCENE_PARAM);
+  if (!id) return null;
+  // Once opened, the scene is this tab's own: a reload restores the tab's autosave, not the save.
+  url.searchParams.delete(SCENE_PARAM);
+  window.history.replaceState(window.history.state, "", url.toString());
+  const [draft, meta] = await Promise.all([loadNamedScene(id), loadNamedSceneMeta(id)]);
+  return draft ? { draft, camera: meta?.camera } : null;
+}
 
 type IdleDeadline = {
   didTimeout: boolean;
@@ -21,7 +44,7 @@ export function useSceneDraftPersistence({
   saveKey
 }: {
   buildDraft: () => StoredSceneEditorDraft;
-  onRestoreDraft: (draft: StoredSceneEditorDraft) => void;
+  onRestoreDraft: (draft: StoredSceneEditorDraft, camera?: SavedSceneCamera) => void;
   saveKey: string;
 }) {
   const [draftHydrated, setDraftHydrated] = useState(false);
@@ -56,7 +79,7 @@ export function useSceneDraftPersistence({
     latestDraftRef.current = draft;
     pendingDraftRef.current = false;
 
-    void saveSceneEditorDraft(draft).catch((error) => {
+    void saveSceneEditorDraft(draft, tabSession.id).catch((error) => {
       console.warn("Failed to save the Theras Editor draft.", error);
     });
   };
@@ -66,13 +89,15 @@ export function useSceneDraftPersistence({
 
     void (async () => {
       try {
-        const draft = await loadStoredSceneEditorDraft();
+        const named = await sceneFromAddress();
+        const draft = named?.draft ?? (await loadStoredSceneEditorDraft(tabSession.restoreId));
+        void pruneTabDrafts(tabSession.id).catch(() => undefined);
 
         if (!draft || cancelled) {
           return;
         }
 
-        onRestoreDraftRef.current(draft);
+        onRestoreDraftRef.current(draft, named?.camera);
       } catch (error) {
         console.warn("Failed to restore the Theras Editor draft.", error);
       } finally {

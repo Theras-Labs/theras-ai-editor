@@ -375,12 +375,18 @@ export function App() {
 
   const draftHydrated = useSceneDraftPersistence({
     buildDraft: buildSceneDraftPayload,
-    onRestoreDraft: (draft) => {
+    onRestoreDraft: (draft, camera) => {
       worldEditor.importBundle(draft.snapshot, "world:restore-draft");
       syncEditorFromWorld("world:restore-draft");
+      // A saved scene opened from the address keeps its view.
+      const view = uiStore.viewports.perspective;
+      if (camera && view) {
+        view.camera.position = vec3(...camera.position);
+        view.camera.target = vec3(...camera.target);
+      }
       // A draft does not keep the view. The start view must not be inside something a generator
       // built (a city around the origin): show the largest built thing.
-      const built = largestTarget(readSites(editor).map((s) => ({ center: s.facts.center, rect: s.facts.rect, height: s.facts.height })));
+      const built = camera ? null : largestTarget(readSites(editor).map((s) => ({ center: s.facts.center, rect: s.facts.rect, height: s.facts.height })));
       if (built) {
         for (const viewport of Object.values(uiStore.viewports)) {
           if (viewport.projection !== "perspective") continue;

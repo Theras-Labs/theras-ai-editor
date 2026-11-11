@@ -1,6 +1,7 @@
 // Saved scenes: the Scenes dialog saves the whole scene under a name in this browser, opens a
 // saved one again, and also saves or opens a .whmap file (to keep a scene on disk or move it
 // to another computer). App.tsx sets the bridge: it owns the world editor and the draft format.
+import { slugifyProjectName } from "@theras/dev-sync";
 import { proxy } from "valtio";
 import {
   deleteNamedScene,
@@ -51,7 +52,8 @@ export const BACKUP_NAME = "Backup before open";
 export async function saveCurrentScene(name: string): Promise<SavedSceneMeta> {
   const b = requireBridge();
   const clean = name.trim() || b.sceneName() || "Untitled scene";
-  const draft = { ...b.build(), projectName: clean };
+  // A saved scene is its own project: its own name and key, so it has its own chats.
+  const draft = { ...b.build(), projectName: clean, projectSlug: slugifyProjectName(clean), projectSlugDirty: false };
   const meta: SavedSceneMeta = { id: savedSceneId(clean), name: clean, updatedAt: Date.now(), nodeCount: b.nodeCount(), camera: currentCamera() };
   await saveNamedScene(meta, draft);
   return meta;

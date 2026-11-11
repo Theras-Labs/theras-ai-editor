@@ -1,6 +1,6 @@
 // Scenes dialog (File > Save scene / Open scene): named saves in this browser, plus .whmap
 // files for disk. Opening a save keeps the current scene first as "Backup before open".
-import { Download, FolderOpen, HardDrive, Loader2, Save, Trash2, Upload, X } from "lucide-react";
+import { Download, ExternalLink, FolderOpen, HardDrive, Loader2, Save, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
@@ -18,6 +18,15 @@ import {
   sceneName,
   type SavedSceneMeta
 } from "@/lib/saved-scenes";
+
+/** A new tab opens the save (?scene=<id>); the tab then keeps its own autosave and chat. */
+function openInNewTab(meta: SavedSceneMeta) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("scene", meta.id);
+  window.open(url.toString(), "_blank", "noopener");
+}
 
 function when(ms: number) {
   const d = new Date(ms);
@@ -88,7 +97,7 @@ export function SavedScenesDialog() {
           <HardDrive className="size-4 text-emerald-300" />
           <div className="flex-1">
             <div className="text-[13px] font-medium text-foreground/90">Scenes</div>
-            <div className="text-[11px] text-muted-foreground">Save the whole scene in this browser, or as a .whmap file to keep on disk.</div>
+            <div className="text-[11px] text-muted-foreground">Save the whole scene in this browser, or as a .whmap file to keep on disk. Each tab keeps its own scene and chat.</div>
           </div>
           <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/8 hover:text-foreground" onClick={close} type="button">
             <X className="size-4" />
@@ -129,6 +138,14 @@ export function SavedScenesDialog() {
                 <Button disabled={busy !== null} onClick={() => void open(s)} size="sm" variant="outline">
                   {busy === s.id ? <Loader2 className="animate-spin" /> : <FolderOpen />} Open
                 </Button>
+                <button
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/8 hover:text-foreground"
+                  onClick={() => openInNewTab(s)}
+                  title="Open in a new tab (its own autosave and its own chat)"
+                  type="button"
+                >
+                  <ExternalLink className="size-3.5" />
+                </button>
                 <button
                   className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-white/8 hover:text-red-300 group-hover:opacity-100"
                   onClick={() => void remove(s)}

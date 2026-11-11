@@ -2,6 +2,7 @@
 // browser storage below can be swapped for a server or database store later:
 // call setChatHistoryStore(yourStore) once at start-up.
 import type { CopilotMessage } from "./types";
+import { otherTabsOpen } from "@/lib/tab-session";
 
 export type ConversationMeta = { id: string; title: string; createdAt: number; updatedAt: number; messageCount: number };
 export type Conversation = ConversationMeta & { messages: CopilotMessage[] };
@@ -22,6 +23,22 @@ let scope = "untitled-scene";
 const indexKey = () => `theras:chats:p:${scope}:index`;
 const currentKey = () => `theras:chats:p:${scope}:current`;
 const chatKey = (id: string) => `theras:chats:${id}`;
+
+/** sessionStorage and localStorage, when the browser gives them (not in tests, not when blocked). */
+function browserStores(): Storage[] {
+  const out: Storage[] = [];
+  try {
+    out.push(sessionStorage);
+  } catch {
+    // none
+  }
+  try {
+    out.push(localStorage);
+  } catch {
+    // none
+  }
+  return out;
+}
 
 export function setChatScope(next: string) {
   scope = next || "untitled-scene";
@@ -96,7 +113,18 @@ export const localChatHistory: ChatHistoryStore = {
       // nothing to do
     }
   },
+  // The open chat is kept per tab (sessionStorage) and per viewer (localStorage, the one
+  // opened last). A reload keeps the tab's own chat. While another editor tab is open, a tab
+  // with no chat of its own in this project starts a new one (the old ones stay in the list),
+  // so two tabs never write into one chat.
   getCurrentId() {
+    try {
+      const own = sessionStorage.getItem(currentKey());
+      if (own) return own;
+    } catch {
+      // no sessionStorage: the viewer's last chat
+    }
+    if (otherTabsOpen()) return null;
     try {
       return localStorage.getItem(currentKey());
     } catch {
@@ -104,11 +132,13 @@ export const localChatHistory: ChatHistoryStore = {
     }
   },
   setCurrentId(id) {
-    try {
-      if (id) localStorage.setItem(currentKey(), id);
-      else localStorage.removeItem(currentKey());
-    } catch {
-      // per-viewer convenience only
+    for (const storage of browserStores()) {
+      try {
+        if (id) storage.setItem(currentKey(), id);
+        else storage.removeItem(currentKey());
+      } catch {
+        // per-viewer convenience only
+      }
     }
   }
 };
