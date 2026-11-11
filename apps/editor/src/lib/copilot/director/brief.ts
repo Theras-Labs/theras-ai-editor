@@ -125,6 +125,7 @@ ${routes.join("\n")}
 - People: a person, human, character, NPC, pedestrian or crowd = compose with creature:person (a rigged, animated figure, 1.75 m). Never the object generator and never primitives for a human.
 - No voxel look: never plan a blocky, cube-built or Minecraft-like character, building or object, unless the user's own words ask for a voxel or block style. This is the user's standing wish.
 - Ids: only ids from the library index (full id = prefix + name, lh:feature: + bench = lh:feature:bench) or from [Library matches]. Do not invent ids. For a kit line, use [Library matches] ids.
+- Scanned objects: an id that starts with scan: comes only from a [Scanned objects] block in the context. These are photo scans of real small products (toys, shoes, kitchen and food items) at real size, 5 to 40 cm; they do not have the stylized look of the library. Use one (compose, its id) only in two cases: the user's words ask for a realistic, real or scanned object; or the library index and [Library matches] have no match for the thing and a scanned object is that same thing at that size. A toy, a package, a dish or a picture of a thing is not the thing (a toy car is not a car, a dog bowl is not a dog): build that with the generator "object". When a local entry matches and the user did not ask for a realistic object, use the local entry.
 - Layout anchors: a node id from the scene digest ("near the windmill" = the id of the windmill node), "camera" or "selection". Never x, y, z unless the user gives coordinates.
 - Composition: one focal point first in items; groups of 3 or 5; plants in clusters; no rows unless asked.
 - Keep params short. Generators fill defaults.
@@ -147,7 +148,7 @@ ${libraryIndex()}`;
 
 // ── Noun pre-resolution (no search step for library objects) ──
 
-const NOT_NOUNS = new Set(
+export const NOT_NOUNS = new Set(
   (
     "a an the of to in on at by for from with and or but near next beside around behind front into onto some few several many more lots bunch " +
     "add place put spawn create make build generate give me my it this that these those there here please can could would you i want need " +

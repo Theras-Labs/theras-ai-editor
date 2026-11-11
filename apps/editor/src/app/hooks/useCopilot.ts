@@ -20,6 +20,7 @@ import { runDirector, newDirectorMetrics } from "@/lib/copilot/director/run";
 import { frameForSite, interiorCameraPose, roomViewOfSite } from "@/lib/copilot/frame-site";
 import { vec3 } from "@theras/shared";
 import { nounMatchesToText, resolveNouns } from "@/lib/copilot/director/brief";
+import { scannedContext } from "@/lib/copilot/director/scanned";
 import { GENERATORS } from "@/lib/copilot/director/generators";
 import { COPILOT_TOOL_DECLARATIONS } from "@/lib/copilot/tool-declarations";
 import { executeTool, type CopilotToolExecutionContext } from "@/lib/copilot/tool-executor";
@@ -313,7 +314,11 @@ export function useCopilot(editor: EditorCore, toolContext: CopilotToolExecution
           const selectionKinds = [...editor.selection.ids].map((id) => editor.scene.getNode(id)?.kind).filter((k): k is NonNullable<typeof k> => Boolean(k));
           const hasImage = Boolean(attachments?.some((a) => a.kind === "image"));
           const digest = isServer ? buildSceneDigest(editor, cameraTarget) : "";
-          const nounText = isServer ? nounMatchesToText(resolveNouns(prompt)) : "";
+          const nouns = isServer ? resolveNouns(prompt) : [];
+          const nounText = isServer ? nounMatchesToText(nouns) : "";
+          // Plan 6: scanned objects, only for a realistic object or a thing with no local match.
+          // At most one request to the Theras server (1.5 s limit); "" in every other case.
+          const scannedText = isServer ? await scannedContext(prompt, nouns) : "";
 
           /** The tool loop. note: director text for the context (understanding, chosen reading). */
           const runLoop = async (note?: string) => {
@@ -372,7 +377,7 @@ export function useCopilot(editor: EditorCore, toolContext: CopilotToolExecution
               provider: copilotProvider.provider,
               providerConfig,
               designModel: modelForStage(settings, "design") || undefined,
-              context: [digest, nounText, ...(playbook ? [playbookToText(playbook, kinds)] : [])].join("\n\n"),
+              context: [digest, nounText, ...(scannedText ? [scannedText] : []), ...(playbook ? [playbookToText(playbook, kinds)] : [])].join("\n\n"),
               anchor: { x: ghost.position.x, z: ghost.position.z },
               generators: GENERATORS,
               signal: controller.signal,
