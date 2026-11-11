@@ -22,6 +22,7 @@ shader.
 | Water: river | `water:river` (parametric: course in `metadata.params`) | one-pass flowing ribbon shader adapted from the stylized water (flow, bank foam, depth from the cross-section); bed and grass banks on flat ground | `water/river-water.ts`, `generated/river.ts`; course and meshes in `src/lib/generators/river/` |
 | Skies | `lh:sky:*` | code: sky dome, sun, light, fog, clouds; lens flare | `little-habitats/environment.ts`, `sky/lens-flare.ts` |
 | Skies: photo | `polyhaven:hdri:*` | external HDR image | `catalog.ts` |
+| Scanned objects (external) | `scan:<id>` | photo scans of real products at real size (Google Scanned Objects, CC BY 4.0). Not in `RESOURCES`: an entry exists after a search on the Theras server (`GET /api/assets/search`) found it, or when this viewer placed it before. The GLB loads from the Hugging Face host when the object is placed | `external/scanned.ts`, `external/scanned-search.ts`; index in `server/data/assets-index.json` |
 | Blocks (primitives) | `theras:recipe:*` | editor primitives (blockouts; last resort) | `src/lib/build-slots/presets.ts` |
 | Places: arenas, worlds | `env:*` (alley arena, desert world) | code: a whole place built from a game's own data and textures. A place registers its ground height (`registerPlaceGround`), so placement stands things and fits water on it | `environments/<place>/`, `place-ground.ts` |
 | Project models | `project:<project>:<file>` | GLB files of an imported project, served by the local server | `src/lib/projects/projects.ts` |
@@ -38,3 +39,5 @@ tap) are editing tools, not library entries: see `terrain-edit.ts` and
 - Old ids keep working: `getResource` maps them to the current id (see `currentId` in
   `catalog.ts`).
 - Search ranks real models and code-built objects before primitive blocks.
+- Local entries win. A scanned object (`scan:*`, tag `scanned`) comes after every local entry in a search, and its score is always less than 0.5. The AI gets scanned objects only for a realistic object or for a thing that the library does not have (`src/lib/copilot/director/scanned.ts`).
+- An external entry with a license that asks for a credit sets `credit` and `creditUrl`. The library card shows the credit.

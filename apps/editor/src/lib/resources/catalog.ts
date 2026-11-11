@@ -14,6 +14,7 @@ import { LH_FEATURE_ENTRIES, LH_LANDMARK_ENTRIES } from "./little-habitats/props
 import { GENERATED_ENTRIES } from "./generated";
 import { ALLEY_ARENA_ENTRIES } from "./environments/alley-arena";
 import { DESERT_WORLD_ENTRIES } from "./environments/desert-world";
+import { getScannedEntry, scannedEntries, scannedScore } from "./external/scanned";
 import type { ResourceEntry, ResourceKind, ResourceSource } from "./types";
 
 const THERAS_RECIPES: ResourceEntry[] = [...DEFAULT_SLOTS, THERAS_TREE_SLOT].filter((slot) => slot.recipe).map((slot) => ({
@@ -139,7 +140,9 @@ export function registerRuntimeEntries(entries: ResourceEntry[]) {
 }
 
 export function getResource(id: string): ResourceEntry | undefined {
-  return byId.get(id) ?? byId.get(currentId(id));
+  // Scanned objects ("scan:<id>", external/scanned.ts) are not in RESOURCES: only the ones that
+  // a search found or that a scene of this viewer used are known.
+  return byId.get(id) ?? byId.get(currentId(id)) ?? getScannedEntry(id);
 }
 
 /** Simple word match over name, tags, kind, origin and description. */
@@ -212,10 +215,21 @@ function wordVariants(word: string): [string, number][] {
 /**
  * searchResources with the score of each result: 3 for each word in the name, 2 in a tag, 1
  * elsewhere. A plural word also matches its singular; a synonym match scores 0.5 less.
+ *
+ * Scanned objects (external photo scans, external/scanned.ts) come after every entry of
+ * RESOURCES, whatever their match: their score is scaled to less than 0.5, the lowest score
+ * of a local match.
  */
 export function searchResourcesScored(query: string, filter: { kind?: ResourceKind; source?: ResourceSource } = {}, limit = 12) {
   const words = query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(wordVariants);
-  const scored = RESOURCES.filter((e) => (!filter.kind || e.kind === filter.kind) && (!filter.source || e.source === filter.source))
+  const local = scoreEntries(RESOURCES, words, filter);
+  if (local.length >= limit) return local.slice(0, limit);
+  const scanned = scoreEntries(scannedEntries(), words, filter).map((r) => ({ entry: r.entry, score: scannedScore(r.score) }));
+  return [...local, ...scanned].slice(0, limit);
+}
+
+function scoreEntries(entries: ResourceEntry[], words: [string, number][][], filter: { kind?: ResourceKind; source?: ResourceSource }) {
+  const scored = entries.filter((e) => (!filter.kind || e.kind === filter.kind) && (!filter.source || e.source === filter.source))
     .map((entry) => {
       const name = entry.name.toLowerCase();
       const hay = `${entry.id} ${entry.kind} ${entry.category ?? ""} ${entry.tags.join(" ")} ${entry.description}`.toLowerCase();
@@ -236,5 +250,5 @@ export function searchResourcesScored(query: string, filter: { kind?: ResourceKi
     })
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit);
+  return scored;
 }

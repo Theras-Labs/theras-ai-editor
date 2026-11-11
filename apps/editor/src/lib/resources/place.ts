@@ -20,6 +20,17 @@ function requireEditor() {
   return editorRef;
 }
 
+/** Library ids of the objects in the scene (metadata.resource), each id one time. */
+export function resourceIdsInScene(): Set<string> {
+  const ids = new Set<string>();
+  if (!editorRef) return ids;
+  for (const node of editorRef.scene.nodes.values()) {
+    const id = node.metadata?.resource;
+    if (typeof id === "string") ids.add(id);
+  }
+  return ids;
+}
+
 function newNodeId(editor: EditorCore, base: string) {
   let i = 1;
   while (editor.scene.nodes.has(`${base}:${i}`)) i++;

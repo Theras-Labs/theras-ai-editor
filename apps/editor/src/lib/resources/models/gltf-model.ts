@@ -4,11 +4,14 @@
 // together).
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { ResourceInstance } from "../types";
 
 export const LIBRARY_BASE = `${import.meta.env.BASE_URL}library`;
 
-const loader = new GLTFLoader();
+// The meshopt decoder reads files with EXT_meshopt_compression (the scanned objects in
+// external/scanned.ts). A file without that extension loads as before.
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const cache = new Map<string, Promise<THREE.Object3D>>();
 
 function loadModel(url: string): Promise<THREE.Object3D> {

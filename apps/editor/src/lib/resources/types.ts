@@ -60,6 +60,10 @@ export type ResourceEntry = {
   /** Preview image URL for the library card. */
   preview?: string;
   license: string;
+  /** Credit text that the license asks for (CC BY). The library card shows it. */
+  credit?: string;
+  /** Page of the original work, for the credit. */
+  creditUrl?: string;
   tags: string[];
   description: string;
   /** Approximate radius in meters, for spacing and for the AI. */

@@ -1,15 +1,20 @@
 // Resource library browser: search the local and external entries, apply a sky, or put an
 // object in the dock so the next tap places it.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { buildSlotStore, upsertSlot } from "@/lib/build-slots/store";
 import type { SlotIcon } from "@/lib/build-slots/types";
 import { RESOURCES, searchResources } from "@/lib/resources/catalog";
-import { placeResource } from "@/lib/resources/place";
+import { SCANNED_TAG, isScannedId } from "@/lib/resources/external/scanned";
+import { scannedTotal, searchScanned } from "@/lib/resources/external/scanned-search";
+import { placeResource, resourceIdsInScene } from "@/lib/resources/place";
 import { aiContextDrag } from "@/lib/ai-context";
 import type { ResourceEntry, ResourceKind, ResourceSource } from "@/lib/resources/types";
 
-type Filter = { label: string; kind?: ResourceKind; source?: ResourceSource };
+type Filter = { label: string; kind?: ResourceKind; source?: ResourceSource; tag?: string };
+
+/** The user stopped typing for this long: one search request goes to the Theras server. */
+const SCANNED_SEARCH_DELAY_MS = 350;
 
 const FILTERS: Filter[] = [
   { label: "All" },
@@ -22,7 +27,9 @@ const FILTERS: Filter[] = [
   { label: "Creatures", kind: "creature" },
   { label: "Skies", kind: "sky" },
   { label: "Blocks", kind: "recipe" },
-  { label: "External", source: "external" }
+  { label: "External", source: "external" },
+  // Photo scans of real products from an external source (resources/external/scanned.ts).
+  { label: "Scanned", tag: SCANNED_TAG }
 ];
 
 const KIND_ICON: Record<ResourceKind, SlotIcon> = {
@@ -69,12 +76,35 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<Filter>(FILTERS[0]!);
   const [message, setMessage] = useState<string | null>(null);
 
-  const results = useMemo(
-    () => searchResources(query, { kind: filter.kind, source: filter.source }, 200),
-    [filter, query]
-  );
+  // Scanned objects come from the index of the Theras server. One request goes out after the
+  // user stops typing (2 letters or more) or opens the "Scanned" filter. Nothing is asked while
+  // the panel is idle. The results are library entries after that, so the search below finds them.
+  const [scannedTick, setScannedTick] = useState(0);
+  const wantsScanned = filter.tag === SCANNED_TAG || (query.trim().length >= 2 && !filter.kind);
+  useEffect(() => {
+    if (!wantsScanned) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void searchScanned(query, 24).then(() => alive && setScannedTick((n) => n + 1));
+    }, SCANNED_SEARCH_DELAY_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query, wantsScanned]);
+
+  // Scanned objects that are in the scene: their cards come first and show "in scene".
+  const inScene = useMemo(() => new Set([...resourceIdsInScene()].filter(isScannedId)), [scannedTick, message, filter, query]);
+  const results = useMemo(() => {
+    const tag = filter.tag;
+    const found = searchResources(query, { kind: filter.kind, source: tag ? "external" : filter.source }, 200);
+    if (!tag) return found;
+    const tagged = found.filter((e) => e.tags.includes(tag));
+    return [...tagged.filter((e) => inScene.has(e.id)), ...tagged.filter((e) => !inScene.has(e.id))];
+  }, [filter, query, scannedTick, inScene]);
   const localCount = RESOURCES.filter((e) => e.source === "local").length;
   const externalCount = RESOURCES.length - localCount;
+  const scannedCount = scannedTotal();
 
   const act = (entry: ResourceEntry) => {
     try {
@@ -100,6 +130,7 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
           <div className="text-sm font-bold text-white/90">Resource library</div>
           <div className="text-[11px] text-white/45">
             {localCount} local, {externalCount} external, by category.
+            {scannedCount > 0 ? ` ${scannedCount} scanned objects by search.` : ""}
           </div>
         </div>
         <input
@@ -135,7 +166,7 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
             key={entry.id}
             onClick={() => act(entry)}
             {...aiContextDrag({ kind: "library", label: entry.name, detail: `${entry.id}, ${entry.kind}, ${entry.source} from ${entry.origin}` })}
-            title={`${entry.id} | ${entry.origin} | ${entry.license}`}
+            title={`${entry.id} | ${entry.origin} | ${entry.license}${entry.creditUrl ? ` | ${entry.creditUrl}` : ""}`}
             type="button"
           >
             {entry.preview ? (
@@ -155,6 +186,13 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
               {entry.category ?? entry.kind}
             </span>
             <span className="line-clamp-2 text-[11px] leading-snug text-white/65">{entry.description}</span>
+            {/* The credit that the license of an external model asks for (CC BY). */}
+            {entry.credit ? (
+              <span className="text-[10px] leading-snug text-sky-200/80">
+                {inScene.has(entry.id) ? <span className="mr-1 rounded-full bg-emerald-400/80 px-1.5 py-px font-bold uppercase text-black">in scene</span> : null}
+                Credit: {entry.credit}
+              </span>
+            ) : null}
           </button>
         ))}
         {results.length === 0 ? <div className="col-span-full py-6 text-center text-sm text-white/45">No match.</div> : null}
