@@ -1,0 +1,40 @@
+{
+  "name": "@theras/runtime-audio",
+  "version": "0.1.12",
+  "description": "Web Audio API adapter for Theras runtime scenes with 3D spatial audio support.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Theras-Labs/theras-ai-editor.git",
+    "directory": "packages/runtime-audio"
+  },
+  "bugs": {
+    "url": "https://github.com/Theras-Labs/theras-ai-editor/issues"
+  },
+  "homepage": "https://github.com/Theras-Labs/theras-ai-editor/tree/main/packages/runtime-audio",
+  "dependencies": {
+    "@theras/runtime-format": "workspace:*",
+    "@theras/shared": "workspace:*"
+  }
+}

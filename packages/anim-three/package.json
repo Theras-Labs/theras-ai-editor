@@ -1,0 +1,33 @@
+{
+  "name": "@theras/anim-three",
+  "version": "0.1.12",
+  "description": "Three.js bridge for theras animation runtime rigs, clips, and skeleton application.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@theras/anim-core": "workspace:*",
+    "@theras/anim-runtime": "workspace:*",
+    "@types/three": "^0.183.1",
+    "three": "^0.184.0"
+  }
+}

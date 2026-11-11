@@ -1,0 +1,34 @@
+{
+  "name": "@theras/game-dev",
+  "version": "0.1.12",
+  "description": "Vite development plugin for Theras game projects with scene discovery and editor sync.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Theras-Labs/theras-ai-editor.git",
+    "directory": "packages/game-dev"
+  },
+  "bugs": {
+    "url": "https://github.com/Theras-Labs/theras-ai-editor/issues"
+  },
+  "homepage": "https://github.com/Theras-Labs/theras-ai-editor/tree/main/packages/game-dev"
+}

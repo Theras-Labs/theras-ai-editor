@@ -1,0 +1,36 @@
+{
+  "name": "theras-ai-editor",
+  "version": "0.1.12",
+  "description": "Bootstrap Theras AI apps with an interactive framework-style CLI.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "template",
+    "README.md"
+  ],
+  "bin": {
+    "create-theras": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "test": "bun test src/cli.test.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Theras-Labs/theras-ai-editor.git",
+    "directory": "packages/create-theras"
+  },
+  "bugs": {
+    "url": "https://github.com/Theras-Labs/theras-ai-editor/issues"
+  },
+  "homepage": "https://github.com/Theras-Labs/theras-ai-editor",
+  "devDependencies": {
+    "@types/node": "^24.10.1"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.1.0",
+    "picocolors": "^1.1.1"
+  }
+}

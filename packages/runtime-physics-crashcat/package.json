@@ -1,0 +1,46 @@
+{
+  "name": "@theras/runtime-physics-crashcat",
+  "version": "0.1.12",
+  "description": "Crashcat physics adapters for Theras runtime scenes.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Theras-Labs/theras-ai-editor.git",
+    "directory": "packages/runtime-physics-crashcat"
+  },
+  "bugs": {
+    "url": "https://github.com/Theras-Labs/theras-ai-editor/issues"
+  },
+  "homepage": "https://github.com/Theras-Labs/theras-ai-editor/tree/main/packages/runtime-physics-crashcat",
+  "devDependencies": {
+    "@types/three": "^0.183.1"
+  },
+  "dependencies": {
+    "@theras/render-pipeline": "workspace:*",
+    "@theras/runtime-format": "workspace:*",
+    "@theras/shared": "workspace:*",
+    "crashcat": "^0.0.3",
+    "three": "^0.184.0"
+  }
+}

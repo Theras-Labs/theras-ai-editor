@@ -1,0 +1,36 @@
+{
+  "name": "__PROJECT_NAME__",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@theras/anim-core": "^0.1.8",
+    "@theras/anim-exporter": "^0.1.8",
+    "@theras/anim-runtime": "^0.1.8",
+    "@theras/anim-schema": "^0.1.8",
+    "@theras/anim-three": "^0.1.8",
+    "@theras/game-dev": "^0.1.8",
+    "@theras/gameplay-runtime": "^0.1.8",
+    "@theras/render-pipeline": "^0.1.8",
+    "@theras/runtime-format": "^0.1.8",
+    "@theras/runtime-physics-crashcat": "^0.1.8",
+    "@theras/shared": "^0.1.8",
+    "@theras/three-runtime": "^0.1.8",
+    "@theras/vfx-exporter": "^0.1.8",
+    "@theras/vfx-schema": "^0.1.8",
+    "@theras/vfx-three": "^0.1.8",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}

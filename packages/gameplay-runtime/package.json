@@ -1,0 +1,41 @@
+{
+  "name": "@theras/gameplay-runtime",
+  "version": "0.1.12",
+  "description": "Lightweight gameplay runtime primitives and system orchestration for Theras scenes.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Theras-Labs/theras-ai-editor.git",
+    "directory": "packages/gameplay-runtime"
+  },
+  "bugs": {
+    "url": "https://github.com/Theras-Labs/theras-ai-editor/issues"
+  },
+  "homepage": "https://github.com/Theras-Labs/theras-ai-editor/tree/main/packages/gameplay-runtime",
+  "dependencies": {
+    "@theras/runtime-format": "workspace:*",
+    "@theras/shared": "workspace:*",
+    "three": "^0.184.0"
+  }
+}

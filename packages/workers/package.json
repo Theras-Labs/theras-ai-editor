@@ -1,0 +1,47 @@
+{
+  "name": "@theras/workers",
+  "version": "0.1.12",
+  "description": "Worker task contracts and managers for Theras export and processing flows.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../scripts/tsup.package.config.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Theras-Labs/theras-ai-editor.git",
+    "directory": "packages/workers"
+  },
+  "bugs": {
+    "url": "https://github.com/Theras-Labs/theras-ai-editor/issues"
+  },
+  "homepage": "https://github.com/Theras-Labs/theras-ai-editor/tree/main/packages/workers",
+  "dependencies": {
+    "@types/three": "^0.183.1",
+    "@theras/editor-core": "workspace:*",
+    "@theras/geometry-kernel": "workspace:*",
+    "@theras/runtime-build": "workspace:*",
+    "@theras/runtime-format": "workspace:*",
+    "@theras/shared": "workspace:*",
+    "comlink": "^4.4.2",
+    "three": "^0.184.0",
+    "three-mesh-bvh": "^0.9.2"
+  }
+}

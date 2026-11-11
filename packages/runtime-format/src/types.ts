@@ -1,0 +1,196 @@
+import type {
+  Asset,
+  BrushNode,
+  Entity,
+  GroupNode,
+  InstancingNode,
+  Layer,
+  LightNode,
+  MaterialTextureVariation,
+  MaterialRenderSide,
+  MeshNode,
+  ModelNode,
+  PropPhysics,
+  PrimitiveNode,
+  SceneSettings
+} from "@theras/shared";
+
+export const RUNTIME_SCENE_FORMAT = "theras-engine" as const;
+export const CURRENT_RUNTIME_SCENE_VERSION = 7 as const;
+export const MIN_RUNTIME_SCENE_VERSION = 4 as const;
+export const CURRENT_RUNTIME_WORLD_INDEX_VERSION = 1 as const;
+
+export type RuntimeMaterial = {
+  baseColorTexture?: string;
+  color: string;
+  emissiveColor?: string;
+  emissiveIntensity?: number;
+  id: string;
+  /**
+   * Optional separate metalness texture (blue channel). When present alongside
+   * `roughnessTexture` (and `metallicRoughnessTexture` is absent) it means the
+   * export skipped the expensive offline pixel-composite step and stored the
+   * channels as independent files. Runtimes should assign each map directly.
+   */
+  metalnessTexture?: string;
+  metallicFactor: number;
+  /** Combined ORM texture (G=roughness, B=metalness) in glTF convention. */
+  metallicRoughnessTexture?: string;
+  name: string;
+  normalTexture?: string;
+  opacity?: number;
+  roughnessFactor: number;
+  /**
+   * Optional separate roughness texture (green channel). See `metalnessTexture`.
+   */
+  roughnessTexture?: string;
+  side?: MaterialRenderSide;
+  textureVariation?: MaterialTextureVariation;
+  transparent?: boolean;
+};
+
+export type RuntimePrimitiveMaterialLayer = {
+  material: RuntimeMaterial;
+  opacity: number;
+  weights: number[];
+};
+
+export type RuntimePrimitiveMaterialBlend = RuntimePrimitiveMaterialLayer;
+
+export type RuntimePrimitive = {
+  blendLayers?: RuntimePrimitiveMaterialLayer[];
+  blend?: RuntimePrimitiveMaterialBlend;
+  indices: number[];
+  material: RuntimeMaterial;
+  normals: number[];
+  positions: number[];
+  uvs: number[];
+};
+
+export type RuntimeGeometry = {
+  primitives: RuntimePrimitive[];
+};
+
+export type RuntimeLodLevel = string;
+
+export type RuntimeGeometryLod = {
+  geometry: RuntimeGeometry;
+  level: RuntimeLodLevel;
+};
+
+export type RuntimeModelLod = {
+  assetId?: string;
+  format?: "glb" | "gltf" | "obj";
+  level: RuntimeLodLevel;
+  materialMtlText?: string;
+  path: string;
+  texturePath?: string;
+};
+
+export type RuntimeGeometryNode =
+  | (BrushNode & { geometry: RuntimeGeometry; lods?: RuntimeGeometryLod[] })
+  | (MeshNode & { geometry: RuntimeGeometry; lods?: RuntimeGeometryLod[] })
+  | (PrimitiveNode & { geometry: RuntimeGeometry; lods?: RuntimeGeometryLod[] });
+
+export type RuntimeModelNode = ModelNode & {
+  lods?: RuntimeModelLod[];
+};
+
+export type RuntimeInstancingNode = InstancingNode;
+
+export type RuntimeNode = GroupNode | RuntimeGeometryNode | RuntimeModelNode | RuntimeInstancingNode | LightNode;
+
+export type RuntimeSceneMetadata = {
+  exportedAt: string;
+  format: typeof RUNTIME_SCENE_FORMAT;
+  version: number;
+};
+
+export type RuntimeScene = {
+  assets: Asset[];
+  entities: Entity[];
+  layers: Layer[];
+  materials: RuntimeMaterial[];
+  metadata: RuntimeSceneMetadata;
+  nodes: RuntimeNode[];
+  settings: SceneSettings;
+};
+
+export type RuntimeBundleFile = {
+  bytes: Uint8Array;
+  mimeType: string;
+  path: string;
+};
+
+export type RuntimeBundle = {
+  files: RuntimeBundleFile[];
+  manifest: RuntimeScene;
+};
+
+export type RuntimePhysicsDescriptor = {
+  node: RuntimeNode;
+  nodeId: string;
+  physics: PropPhysics;
+};
+
+export type RuntimeWorldChunk = {
+  bounds: [number, number, number, number, number, number];
+  bundleUrl?: string;
+  id: string;
+  loadDistance?: number;
+  manifestUrl?: string;
+  tags?: string[];
+  unloadDistance?: number;
+};
+
+export type RuntimeSharedAssetPack = {
+  baseUrl: string;
+  id: string;
+};
+
+export type RuntimeWorldIndex = {
+  chunks: RuntimeWorldChunk[];
+  sharedAssets?: RuntimeSharedAssetPack[];
+  version: number;
+};
+
+export type RuntimeWorldBundle = {
+  files: RuntimeBundleFile[];
+  index: RuntimeWorldIndex;
+};
+
+export type RuntimeAudioDescriptor = {
+  autoPlay: boolean;
+  channel: string;
+  clip: string;
+  distanceModel: string;
+  hookId: string;
+  loop: boolean;
+  maxDistance: number;
+  pitch: number;
+  position?: { x: number; y: number; z: number };
+  refDistance: number;
+  rolloffFactor: number;
+  spatial: boolean;
+  stopEvent?: string;
+  targetId: string;
+  triggerEvent?: string;
+  volume: number;
+};
+
+export type TherasExportMaterial = RuntimeMaterial;
+export type TherasExportPrimitive = RuntimePrimitive;
+export type TherasExportGeometry = RuntimeGeometry;
+export type TherasLodLevel = RuntimeLodLevel;
+export type TherasExportGeometryLod = RuntimeGeometryLod;
+export type TherasExportModelLod = RuntimeModelLod;
+export type TherasEngineGeometryNode = RuntimeGeometryNode;
+export type TherasEngineModelNode = RuntimeModelNode;
+export type TherasEngineInstancingNode = RuntimeInstancingNode;
+export type TherasEngineNode = RuntimeNode;
+export type TherasEngineSceneMetadata = RuntimeSceneMetadata;
+export type TherasEngineScene = RuntimeScene;
+export type TherasEngineBundleFile = RuntimeBundleFile;
+export type TherasEngineBundle = RuntimeBundle;
+export type TherasRuntimePhysicsDescriptor = RuntimePhysicsDescriptor;
+export type TherasRuntimeWorldBundle = RuntimeWorldBundle;
