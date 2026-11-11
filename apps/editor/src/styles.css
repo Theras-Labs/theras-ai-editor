@@ -1,0 +1,99 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: dark;
+  --background: oklch(0.17 0.01 165);
+  --foreground: oklch(0.95 0.01 165);
+  --card: oklch(0.21 0.012 165);
+  --card-foreground: oklch(0.95 0.01 165);
+  --popover: oklch(0.2 0.012 165);
+  --popover-foreground: oklch(0.95 0.01 165);
+  --primary: oklch(0.7 0.14 165);
+  --primary-foreground: oklch(0.16 0.01 165);
+  --secondary: oklch(0.26 0.014 165);
+  --secondary-foreground: oklch(0.92 0.01 165);
+  --muted: oklch(0.24 0.01 165);
+  --muted-foreground: oklch(0.74 0.01 165);
+  --accent: oklch(0.26 0.018 165);
+  --accent-foreground: oklch(0.95 0.01 165);
+  --destructive: oklch(0.64 0.19 25);
+  --border: transparent;
+  --input: transparent;
+  --ring: oklch(0.7 0.14 165);
+  --chart-1: oklch(0.7 0.14 165);
+  --chart-2: oklch(0.72 0.08 208);
+  --chart-3: oklch(0.69 0.09 112);
+  --chart-4: oklch(0.63 0.11 150);
+  --chart-5: oklch(0.79 0.06 86);
+  --radius: 1rem;
+  --sidebar: transparent;
+  --sidebar-foreground: oklch(0.95 0.01 165);
+  --sidebar-primary: oklch(0.7 0.14 165);
+  --sidebar-primary-foreground: oklch(0.16 0.01 165);
+  --sidebar-accent: oklch(0.24 0.01 165);
+  --sidebar-accent-foreground: oklch(0.95 0.01 165);
+  --sidebar-border: transparent;
+  --sidebar-ring: oklch(0.7 0.14 165);
+}
+
+* {
+  box-sizing: border-box;
+  @apply ring-0;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(16, 185, 129, 0.08), transparent 24%),
+    linear-gradient(180deg, #08100d 0%, #050807 100%);
+  color: #ecfdf5;
+  font-family: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(16, 185, 129, 0.24);
+  color: inherit;
+}
+
+/* Running steps in the shadcn Trace component (Ask Theras). */
+@utility shimmer {
+  background-image: linear-gradient(90deg, var(--muted-foreground) 0%, var(--foreground) 50%, var(--muted-foreground) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: theras-shimmer 1.6s linear infinite;
+}
+
+@keyframes theras-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
