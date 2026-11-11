@@ -4,6 +4,21 @@ Theras AI is a 3D world editor that runs in the browser. You say what you want i
 
 Theras AI is developed and maintained by Theras Labs, Inc. It is open source under the MIT License. The project combines its editor, runtime and tooling with an AI harness, a resource library, provider integrations and game mode.
 
+## What it builds
+
+![An empty grid, then a city of 25 blocks](docs/media/city-build.gif)
+
+From nothing to a city. The prompt was "build a downtown city with parks and tree-lined streets. Do not add a sky or any environment." The model wrote its brief in 4 s. The editor asked how big the city must be. Code then built 5 x 5 blocks, about 500 objects, in 19 s. The picture is a time-lapse of that build.
+
+| | |
+|---|---|
+| ![A city with three towers](docs/media/city-skyline.jpg) | ![A green island in a lagoon](docs/media/island.jpg) |
+| **City.** Three more prompts added the towers: art deco (130 m), glass (90 m) and needle (110 m). Before each tower the editor asked where it must stand. Each tower was built in about 5 s. | **Island.** The template "Cozy island". The rowboat and the campfire came from "add a rowboat near the lighthouse" and "add a campfire near the bench". The editor placed both with no model call. |
+| ![A cobbled square at sunset](docs/media/alley-arena.jpg) | ![A desert with palm trees, mesas and a stone hand](docs/media/desert-oasis.jpg) |
+| **Alley arena.** A template. Code builds the place again from its data and its drawn textures. | **Desert.** The template "Desert of the giants". Two prompts added the palm trees and the rocks. Before the second one the editor asked which trees. |
+
+All pictures are captures of the 3D view of the editor (`apps/editor`, port 8080), taken on 2026-11-11 with the model `gpt-5.6-luna`. They were only made smaller for this page. The files are in `docs/media`.
+
 ## Folders, ports and roles
 
 | Folder | Port | Role |
@@ -105,15 +120,31 @@ Also local:
 |---|---|---|
 | Poly Haven HDR skies (CC0) | Works | The file is fetched from the source host when the sky is used. |
 | A project folder on your computer | Works | Project import (see above). |
-| Hugging Face 3D datasets | Designed, not built | See below. |
+| Scanned objects from Hugging Face (CC BY 4.0) | Works | 713 photo scans of real products at real size. See below. |
 
-The design for Hugging Face is in `docs/plans/realtime-ai-harness.md`, section 6:
+### Scanned objects (Hugging Face)
 
-- No search on Hugging Face at prompt time. It is slow and the quality is not controlled.
-- A one-shot script reads the dataset metadata and writes an index: name, category, size in meters, triangles, bytes, thumbnail, model URL, license and attribution.
-- The index keeps only models whose license allows redistribution and whose size is small enough for a browser.
-- The AI server searches the index in memory. The editor loads a model from the source host when it is placed.
-- First dataset: `codepawl/scanned-objects-glb` (1,033 scanned objects with real sizes, CC-BY-4.0). These are photo scans, so they are used only for a realistic object or when the library has no match. CC-BY needs a credits list, which the index generates.
+The source is the dataset `codepawl/scanned-objects-glb`: GLB copies of Google Scanned Objects (Google Research, CC BY 4.0). The design is in `docs/plans/realtime-ai-harness.md`, section 6.
+
+| | |
+|---|---|
+| ![The prompt "add a realistic mug" and the scanned mug in the scene](docs/media/scanned-mug-prompt.jpg) | ![Library cards of scanned mugs with the credit text](docs/media/scanned-library-card.jpg) |
+| The prompt "add a realistic mug" placed this scanned mug at its real size in 3.9 s. | The library search "mug". Each card shows the credit. The card of the mug in the scene shows "in scene". |
+
+![A scanned mug and a scanned Jenga game on the desert ground](docs/media/scanned-mug-and-jenga.jpg)
+
+The mug and the Jenga game ("add a jenga game") are scans of real products, so their sizes are real: the game is 29 cm tall. Screenshots of the editor on port 8080, 2026-11-11.
+
+- **Index.** `server/scripts/build-asset-index.ts` is a one-shot script. Run it by hand in the folder `server` with `bun run assets:index`. It makes two requests to Hugging Face, checks the license on the dataset card and the column names, and writes `server/data/assets-index.json` and `ATTRIBUTION.md`. It stops and writes nothing when the dataset is not as expected.
+- **Filter.** The index keeps a model only when its license allows redistribution, its file is 1,000,000 bytes or less after packing, and it has 20,000 triangles or less. Result on 2026-11-11: 713 of 1,033 models. Left out: 13 for the file size, 305 for the triangles, 2 for an id with a letter that is not ASCII.
+- **Search.** `GET /api/assets/search?q=` in `server/src/main.ts` searches the index in memory. The server reads the index one time at start. No search runs on Hugging Face at prompt time, and the server never calls Hugging Face.
+- **Library.** `apps/editor/src/lib/resources/external/scanned.ts` makes a library entry (`scan:<id>`, tag `scanned`) from each search result. The size is the real size from the index. In a library search, every local entry comes before every scanned entry. The library panel has a "Scanned" filter. A card shows a thumbnail, the real size and the credit, and "in scene" for a model that is in the scene.
+- **Loading.** The editor loads the GLB from the Hugging Face host only when the object is placed. A loaded file is kept for the session. A model that was placed is remembered in the browser, so a saved scene shows it after a reload.
+- **When the AI uses one.** Only when the request asks for a realistic object ("add a realistic mug"), or when a simple "add" request names a thing that the library does not have and a scan is that same thing ("add a jenga game"). One rule in `apps/editor/src/lib/copilot/director/brief.ts` says this. A toy of a thing is not the thing: "add an airplane" still builds a modeled airplane.
+- **No background work.** There is no timer, no poller, no retry and no database. The editor asks the server only when the user types in the library search, opens the "Scanned" filter, or sends a prompt that fits the rule above.
+- **Credits.** CC BY 4.0 needs a credit. `ATTRIBUTION.md` lists every model in the index with a link to the original scan. The library card shows the credit text.
+
+Limits: these are photo scans of branded products, so they do not match the stylized look of the library. Each model has a 2048 px texture. A scene that is opened in another browser does not show its scanned objects until a search finds them again. Other Hugging Face datasets are not in the index.
 
 ## Providers: three open ways to connect a model
 
@@ -215,7 +246,7 @@ Known limits:
 
 - Only a modern tower has a hall that the interior generator can fit. Other buildings are closed shapes.
 - The object generator is the weakest part: a thing that the library does not have is built from simple parts.
-- Hugging Face assets are designed but not built.
+- External scanned objects come from one Hugging Face dataset. They are photo scans, so the AI uses them only for a realistic object or a thing that the library does not have.
 - Voice needs the `openai` backend of the server.
 
 ## Credits and licenses
@@ -227,4 +258,5 @@ Theras AI is open source under the MIT License. See `LICENSE` for the project co
 - folio-2025 by Bruno Simon, MIT: tree trunks, leaf cluster layout and leaf texture. License text in `apps/editor/src/lib/resources/nature/folio-tree-data.ts`.
 - Stylized water by MatrixRex and norio, MIT. License text in `apps/editor/public/library/textures/water/LICENSE.txt`.
 - Poly Haven, CC0: photo skies.
+- Google Scanned Objects by Google Research, CC BY 4.0 (Copyright 2020 Google LLC): the external scanned objects, loaded from the Hugging Face dataset `codepawl/scanned-objects-glb`. The full credit list is in `ATTRIBUTION.md`.
 - libraries.dev by Jakub Antalik, MIT: voice ring, voice glow and thinking orbs.

@@ -299,6 +299,34 @@ Do not search Hugging Face at prompt time. It is slow and the result quality is 
 - The collection `cfahlgren1/3d-datasets-in-the-dataset-viewer` lists more datasets (for example `W1nst0nGe/hssd-glb`, `alecjacobson/threedscans`, `cfahlgren1/lowpoly-coder-4b-data`). The collection page does not state their licenses. Read each dataset card before use. Not verified yet.
 - Better match for the Theras style: CC0 stylized kits (Kenney, Quaternius) and Poly Haven models (CC0). Verify license and hosting for each before use.
 
+### 6.1 Built on 2026-11-11: the scanned objects
+
+Status: built for `codepawl/scanned-objects-glb`. The other sources of this section are not built. Results are in section 9, "External assets (6)".
+
+Checked on Hugging Face before the build (2026-11-11, dataset commit `1cde9d39eb0db55bd90bebb8e7baab0fb5486291`): the dataset card gives the license `cc-by-4.0`; `metadata.jsonl` has 1,033 rows; each row has the license `CC-BY-4.0`; the columns `id`, `name`, `category`, `brand`, `license`, `file`, `thumb`, `size_metres`, `triangles`, `pack_bytes` and `source` exist. The scans are Google Scanned Objects by Google Research (Copyright 2020 Google LLC). The dataset holds GLB copies with meshopt geometry and a 2048 px WebP texture.
+
+| Part | File | What it does |
+|---|---|---|
+| Filter, index type, search | `server/src/assets.ts` | `judgeRow` keeps a row only with complete columns, a license that allows redistribution, 1,000,000 bytes or less (`pack_bytes`) and 20,000 triangles or less. `searchAssets` searches the index in memory. No network request, no timer. |
+| Index script | `server/scripts/build-asset-index.ts` | Run by hand: `bun run assets:index` in `server`. Two GET requests to Hugging Face, each tried one time. Checks the card license and the columns, then writes the index and the credits file. Writes nothing when a check fails. |
+| Index | `server/data/assets-index.json` | 713 models. Each has `id, name, category, tags, styleTags, size_metres, triangles, bytes, thumb, glb, license, attribution, source`. The URLs name the dataset commit, so a later change of the dataset does not change the files. |
+| Credits | `ATTRIBUTION.md` | Written by the script: author, license, source, changes, and one line for each model with a link to the original scan. |
+| Search route | `server/src/main.ts` | `GET /api/assets/search?q=&limit=` (limit 1 to 50, default 12). The index is read one time at server start. |
+| Library source | `apps/editor/src/lib/resources/external/scanned.ts` | A search result becomes a library entry: id `scan:<id>`, tag `scanned`, kind `feature`, source `external`, real size (scale 1), credit text. The GLB loads from the Hugging Face host when the object is built. |
+| Search client | `apps/editor/src/lib/resources/external/scanned-search.ts` | One request to the Theras server for each new query. An answer is kept in memory. No timer, no retry. |
+| Ranking | `apps/editor/src/lib/resources/catalog.ts` | Scanned entries are not in `RESOURCES`. `searchResourcesScored` puts them after every local entry and scales their score to less than 0.5 (the lowest score of a local match). So the instant path, the noun matches and the library index of the prompts never take one. |
+| Director | `apps/editor/src/lib/copilot/director/scanned.ts`, rule "Scanned objects" in `brief.ts` | The director gets a `[Scanned objects]` block (ids, names, category, real size) only in two cases: the words ask for a realistic object, or a simple "add <thing>" request names a thing with no local match. In every other case no request is made. |
+| Library panel | `apps/editor/src/components/editor-shell/ResourceLibraryPanel.tsx` | Filter "Scanned". A search asks the server 350 ms after the user stops typing. A card shows the thumbnail, the real size and the credit; "in scene" marks a model that is in the scene. |
+
+Decisions made during the build:
+
+- Triangle limit: 20,000. The scans are not simplified (median 12,316 triangles). 20,000 keeps 69% of the models.
+- Two rows have an id with a letter that is not ASCII ("Pokémon ..."). The filter leaves them out, because the id is part of a URL and of a node id.
+- The editor does not hold the index. It asks the search route when the user acts. A model that was placed is remembered in the browser (`localStorage`, key `theras:scanned-used`), so a saved scene shows it after a reload with no request to the Theras server.
+- The loader in `apps/editor/src/lib/resources/models/gltf-model.ts` now has the meshopt decoder. The scanned files need it. Other GLB files load as before.
+- The credit is shown on the library card. A separate credits panel is not built.
+- "The library has no match" is narrow on purpose. The index has many toys and packages with common words in the name (a toy airplane, a dog bowl, a film named "House of Cards"). The rule tells the director that a toy or a package of a thing is not the thing.
+
 ## 7. Phase 4: orchestration and image-to-build
 
 7.1 **Planner and workers (Tier 3).** Trigger: the prompt names 3 or more areas or asks for a "scene / village / level / world". Step 1: one `compose` call returns a zone plan as JSON (`zones: [{ name, center, radius, theme, items }]`), no tools. Step 2: one streamed worker call for each zone, 3 in parallel, 4 zones maximum, 3 steps maximum for each worker. All tool calls go through one serial op queue, so the build reveal plays zone by zone. Total time limit 40 s; then stop and report.
@@ -477,6 +505,77 @@ Scene: the "Desert of the giants" template, opened at `http://localhost:8080` (t
 Found in this test and changed: the first ring had 8 copies on two radii (arc length in place of chord); the ring was not closed, because the director sent `closed` and a count of its own; all copies had the same turn; the cactus model held a puddle; the grown cacti filled the view.
 
 Not tested in the live editor: a row, a group with a count, other colors, a change of shape by the modeler (unit tests cover them). Not tested: game mode (walking between the cacti, their colliders). Open: a puddle is no obstacle, so "add a cactus here" with the camera on a puddle still stands in it. An object that was modeled before this change and that holds a place in its model (a puddle under the cactus) keeps it in each copy; ask for a change ("remove the puddle from the cactus") first.
+
+### External assets (6), measured 2026-11-11, model `gpt-5.6-luna`
+
+Index (script `server/scripts/build-asset-index.ts`, one run, two requests to Hugging Face):
+
+| Measure | Value |
+|---|---|
+| Rows in the dataset | 1,033 |
+| Kept in `server/data/assets-index.json` | 713 |
+| Left out: file over 1,000,000 bytes | 13 |
+| Left out: over 20,000 triangles | 305 |
+| Left out: id with a letter that is not ASCII | 2 |
+| Left out: license | 0 |
+| Size of the index file | 601,747 bytes |
+| `ATTRIBUTION.md` | 736 lines, one line for each model |
+
+Search route, tested on a server on port 4312 (`PORT=4312 bun src/main.ts` in `server`; the process was stopped after the test):
+
+| Query | Result | Time |
+|---|---|---|
+| `realistic mug` | 4 mugs; the word "realistic" is not a search word | 7 ms (first request) |
+| `coffee mug` | the 2 mugs with both words first | 1 ms |
+| `shoe` | shoes with the word in the name first, then by category | 1 ms |
+| `zzzz` | no result | 1 ms |
+| empty | one model of each category in turn | 1 ms |
+
+The server on port 4310 runs with `bun --watch`, so it has the route too. A request from the editor page to port 4310 took 10 ms the first time and 2 ms at prompt time.
+
+Editor, tested in the built-in browser at `http://localhost:8080` (the build of port 8080; this origin has its own saved scene, the "Desert of the giants" test scene). Window 800 px wide. Screenshots: `docs/plans/screens/` (files `v7-0` to `v7-3`).
+
+| Request | Result | Time |
+|---|---|---|
+| "add a realistic mug" | Brief: compose with `scan:Cole_Hardware_Mug_Classic_Blue`. The mug stands at the camera target at real size (about 17 x 13 x 9 cm). Summary: `Placed 1 library object.` | 3.9 s total (brief 3.85 s, 5,379 tokens in, 114 out). The asset search took 2 ms. The GLB (125,680 bytes) came from the Hugging Face host in 1.1 s. |
+| Page reload | The mug shows again. No request for assets to the Theras server; the GLB loads again from the Hugging Face host. | 0.8 s for the GLB |
+| "add an airplane" | Brief: generator `object`, subject "airplane". The 2 scanned toy airplanes in the context were not used. The build was stopped after the brief. | brief 2.75 s |
+| "add a jenga game" | Brief: compose with `scan:2_of_Jenga_Classic_Game` (the library has no match, and the scan is that thing). The game stands next to the mug, 29 cm tall. | 2.3 s total |
+| "add a dog" | Brief: generator `object`, subject "dog". The scanned dog bowls in the context were not used. The build was stopped after the brief. | brief 2.4 s |
+| Library panel, filter "Scanned" | Cards with thumbnail, real size and credit. The header shows "713 scanned objects by search". | - |
+| Library panel, search "mug" | 4 scanned mugs. The card of the mug in the scene shows "in scene" and the credit. | - |
+| Library card "ACE Coffee Mug" to the dock, then one tap in the scene | The mug is placed. The GLB loads at the tap, not when the card goes to the dock. | 1.1 s for the GLB |
+
+Tests: `apps/editor/tests/scanned-assets.test.ts` has 29 tests (the index filter, the index file, the search ranking, the rule that local entries win, the director context). `bun test tests/` in `apps/editor`: 543 pass. `bunx tsc --noEmit` in `apps/editor` and `bun run check` in `server` pass.
+
+Not tested: game mode with a scanned object (walking, colliders). GPU memory of the 2048 px textures (the dataset card gives a median of 21.5 MiB for each object; not measured here). Many scanned objects in one scene. A window of about 2000 px. A Theras server that is not on the same computer. A slow or closed Hugging Face host (the code logs a warning and leaves the object empty). The Docker image of `server` (the Dockerfile now copies `data`; it was not built). A realistic request with an image, or in a scene with a city.
+
+Open: a scene that is opened in another browser does not show its scanned objects, because that browser has no record of them. A realistic request for a thing that has no scan ("a realistic dragon") gives the director weak matches (a saucer named "Dragon Fly"); the rule tells it to use a scan only when it is that thing, and this case was tested only in a dry run. The tool loop (mode edit) and the Gemini and Codex providers do not get the `[Scanned objects]` block. The test left one dock slot ("ACE Coffee Mug") in the dock of `http://localhost:8080`; the scene there is as it was.
+
+### Pictures for the README, made 2026-11-11 in the editor at `http://localhost:8080`, model `gpt-5.6-luna`
+
+The pictures and the GIF in `README.md` are in `docs/media`. Each is a capture of the 3D view (window 1920 x 1080, 3D view 1660 x 1040, render quality 0.75), made smaller to 1600 px.
+
+| Scene | How it was made | Time |
+|---|---|---|
+| City (GIF) | Empty scene. "build a downtown city with parks and tree-lined streets. Do not add a sky or any environment." Size chosen: Metropolis (5 x 5 blocks). 510 scene nodes. | brief 4.3 s, total 23.0 s |
+| City, tower 1 | "build a tall landmark skyscraper tower in the downtown. Do not add a sky." Chosen: on the avenue, art deco, 130 m. | brief 3.1 s, total 5.7 s |
+| City, tower 2 | "build a second landmark tower, a glass tower, 90 m tall. Do not add a sky." Chosen: low-rise corner. | total 5.3 s |
+| City, tower 3 | "build a third landmark tower, a needle tower, 110 m tall. Do not add a sky." Chosen: beside the city. | total 5.2 s |
+| Island | Template "Cozy island", then "add a rowboat near the lighthouse" and "add a campfire near the bench". | instant path, 1 to 2 ms each |
+| Alley arena | Template "Alley arena". No prompt. | - |
+| Desert | Template "Desert of the giants", then "add a puddle here" (director, 3.8 s), "add five palm trees around the puddle" (instant path, 0.7 s) and a prompt for more palm trees and rocks (10 library objects, 7.9 s for the brief). | - |
+
+The GIF is a time-lapse: 28 frames of a 30 s recording. During the build the recording has about 1 frame each second, with one gap of 6 s at the start. The cause was not measured: it is the work of adding 510 nodes, or a Browser pane that was hidden at that time. So the build reveal of this city is not shown as a smooth motion.
+
+Found during this work (not changed):
+
+- **A city under an island sky is hidden by fog.** The fog of the `lh:sky:*` skies ends at about 100 to 130 m (`apps/editor/src/vendor/little-habitats/atmosphere/state.ts`). A city is 110 to 300 m wide, so from a camera that shows all of it, the view is only haze. In an empty scene the director adds such a sky by itself (`compose {"environment":"lh:sky:anime_morning"}`), so "build a city" in an empty scene gives a city that the far view does not show. The desert place has its own haze for this reason (`apps/editor/src/lib/resources/environments/desert-world/materials.ts`). The city pictures were made with no sky.
+- **A change of sky can leave old fog.** After a change from an `lh:sky:*` sky to the photo sky (`polyhaven:hdri:*`), the city was one flat orange color until the page was loaded again.
+- **A second tower is offered the block of the first.** The site choice "Downtown, on the avenue" was block 2,2 for tower 1, tower 2 and tower 3. With the suggested choice, the three towers stood in one another.
+- **"create 3 skyscrapers downtown" gave kit buildings.** The director chose `compose` with `model:city-commercial` skyscraper pieces for that prompt. "build a tall landmark skyscraper tower" gave the `architecture` generator.
+- **A puddle cannot become a pond, and a pond cannot be added next to it.** Answers: `"node:resource:puddle:1" is in the scene, but no generator built it, so the compose generator cannot change it` and `Not built: Clear lake: the scene already has water`. Both answers are true to the scene; nothing was claimed.
+- The tower beside the city stands outside the city ground, on nothing, when the scene has no other ground.
 
 ## 10. Constraints for the executor
 
