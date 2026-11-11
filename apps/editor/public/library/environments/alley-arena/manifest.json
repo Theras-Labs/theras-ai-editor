@@ -1,0 +1,76 @@
+{
+ "sign_squeakeasy": {
+  "file": "sign_squeakeasy.jpg",
+  "v": 2
+ },
+ "sign_hotel": {
+  "file": "sign_hotel.jpg",
+  "v": 2
+ },
+ "billboard": {
+  "file": "billboard.jpg",
+  "v": 1
+ },
+ "poster_boss": {
+  "file": "poster_boss.jpg",
+  "v": 2
+ },
+ "poster_gunner": {
+  "file": "poster_gunner.jpg",
+  "v": 2
+ },
+ "poster_goon": {
+  "file": "poster_goon.jpg",
+  "v": 2
+ },
+ "poster_boss2": {
+  "file": "poster_boss2.jpg",
+  "v": 2
+ },
+ "crate": {
+  "file": "crate.jpg",
+  "v": 1
+ },
+ "barrel": {
+  "file": "barrel.jpg",
+  "v": 1
+ },
+ "cheese": {
+  "file": "cheese.jpg",
+  "v": 1
+ },
+ "keg": {
+  "file": "keg.jpg",
+  "v": 1
+ },
+ "door0": {
+  "file": "door0.jpg",
+  "v": 1,
+  "level": 95
+ },
+ "door1": {
+  "file": "door1.jpg",
+  "v": 1,
+  "level": 115
+ },
+ "door2": {
+  "file": "door2.jpg",
+  "v": 1,
+  "level": 88
+ },
+ "door3": {
+  "file": "door3.jpg",
+  "v": 1,
+  "level": 130
+ },
+ "garage": {
+  "file": "garage.jpg",
+  "v": 1,
+  "level": 105
+ },
+ "shutter": {
+  "file": "shutter.jpg",
+  "v": 1,
+  "level": 100
+ }
+}
