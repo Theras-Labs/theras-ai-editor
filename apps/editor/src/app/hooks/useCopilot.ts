@@ -6,6 +6,7 @@ import type { EditorCore } from "@theras/editor-core";
 import type { CopilotMessage, CopilotProviderConfig, CopilotRunMetrics, CopilotSession, CopilotToolResult } from "@/lib/copilot/types";
 import { runAgenticLoop, type LoopMetrics } from "@/lib/copilot/agentic-loop";
 import { createCopilotProvider } from "@/lib/copilot/provider";
+import { beginServerRun } from "@/lib/copilot/server-provider";
 import { buildProfileSystemPrompt, buildSystemPrompt } from "@/lib/copilot/system-prompt";
 import { asksForMissingTool, closingTextForStep, pickProfile, toolsForProfile, type ToolProfile } from "@/lib/copilot/tool-profiles";
 import { buildSceneDigest, digestNodes } from "@/lib/copilot/scene-digest";
@@ -137,6 +138,7 @@ export function useCopilot(editor: EditorCore, toolContext: CopilotToolExecution
 
   const sendMessage = useCallback(
     async (prompt: string, attachments?: CopilotAttachment[], options: { skipInstant?: boolean } = {}) => {
+      beginServerRun(); // one id for every model call of this prompt (hosted demo quota)
       const settings = loadCopilotSettings();
       const startedAt = performance.now();
       // Game mode: "here" is the point in front of the player, not the editor camera target.

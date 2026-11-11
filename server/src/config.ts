@@ -110,3 +110,15 @@ export const limits = {
   perMinute: Number(process.env.AI_RATE_LIMIT_PER_MINUTE) || 60,
   perDay: Number(process.env.AI_RATE_LIMIT_PER_DAY) || 1500
 };
+
+/**
+ * Hosted demo quota (prompts, not calls). All 0 by default: a local run with your own key has
+ * no quota. On the hosted demo set AI_PROMPTS_PER_IP_PER_DAY, AI_PROMPTS_PER_DAY,
+ * AI_CALLS_PER_PROMPT and optionally AI_DEMO_ENDS_AT (an ISO date and time).
+ */
+export const promptQuota = {
+  perIp: Math.max(0, Number(process.env.AI_PROMPTS_PER_IP_PER_DAY) || 0),
+  total: Math.max(0, Number(process.env.AI_PROMPTS_PER_DAY) || 0),
+  callsPerPrompt: Math.max(0, Number(process.env.AI_CALLS_PER_PROMPT) || 0),
+  endsAt: Date.parse(process.env.AI_DEMO_ENDS_AT ?? "") || 0
+};

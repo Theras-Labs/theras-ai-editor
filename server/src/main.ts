@@ -5,11 +5,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
-import { adminToken, allowedOrigins, getActive, isProviderId, limits, providers, publicConfig, reasoningEffortFor, setActive, transcribeModel, ttsModel, ttsVoice } from "./config";
+import { adminToken, allowedOrigins, getActive, isProviderId, limits, promptQuota, providers, publicConfig, reasoningEffortFor, setActive, transcribeModel, ttsModel, ttsVoice } from "./config";
 import { chatGemini } from "./gemini";
 import { chatOpenAI, fixedTemperature, streamOpenAI } from "./openai";
 import { chatCompat, streamCompat } from "./openai-compat";
-import { checkRate } from "./rate-limit";
+import { admitPrompt, checkRate, promptsLeft } from "./rate-limit";
 import { projectRoutesEnabled, readProjectFile, scanProject } from "./projects";
 import { EFFORTS, UpstreamError, type ChatRequest, type ChatResult, type StreamEmit, type StreamEvent } from "./wire";
 
@@ -75,8 +75,12 @@ function admitChat(request: Request, body: unknown, ip: string): { req: ChatRequ
     if (!allowed.includes(req.model)) {
       return { status: 400, error: `model ${req.model} is not allowed for provider ${active.provider}. Allowed: ${allowed.join(", ")}` };
     }
-    return { req, active: { ...active, model: req.model } };
   }
+  // Hosted demo quota (prompts per visitor and for all visitors). Checked last, so a bad
+  // request does not use a prompt.
+  const quota = admitPrompt(ip, request.headers.get("x-theras-run"), promptQuota);
+  if (quota) return { status: 429, error: quota };
+  if (req.model && req.model !== active.model) return { req, active: { ...active, model: req.model } };
   return { req, active };
 }
 
@@ -214,7 +218,7 @@ const app = new Elysia()
     cors({
       origin: (request) => originAllowed(request.headers.get("origin")),
       methods: ["GET", "POST", "PUT", "OPTIONS"],
-      allowedHeaders: ["content-type", "authorization"]
+      allowedHeaders: ["content-type", "authorization", "x-theras-run"]
     })
   )
   .get("/health", () => ({ ok: true }))
@@ -252,7 +256,7 @@ const app = new Elysia()
     }
     return new Response(file.body, { headers: { "content-type": file.type, "cache-control": "no-cache" } });
   })
-  .get("/api/ai/config", () => publicConfig())
+  .get("/api/ai/config", ({ request, server }) => ({ ...publicConfig(), promptsLeft: promptsLeft(clientIp(request, server), promptQuota) }))
   .put("/api/admin/ai", ({ request, body, set }) => {
     if (!adminToken) {
       set.status = 404;

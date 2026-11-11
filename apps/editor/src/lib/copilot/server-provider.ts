@@ -113,6 +113,20 @@ function usageOf(value: unknown): CopilotUsage | undefined {
  */
 let streamRouteMissing = false;
 
+/**
+ * Id of the user's current prompt. Every model call of one prompt (director and tool loop steps)
+ * sends it, so a hosted demo quota counts prompts, not calls. useCopilot starts one per prompt.
+ */
+let runId = "";
+
+export function beginServerRun() {
+  runId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function runHeaders(extra: Record<string, string>) {
+  return runId ? { ...extra, "x-theras-run": runId } : extra;
+}
+
 export function createServerProvider(): CopilotProvider {
   const provider: CopilotProvider = {
     async generateContent(
@@ -127,7 +141,7 @@ export function createServerProvider(): CopilotProvider {
       try {
         res = await fetch(`${base}/api/ai/chat`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: runHeaders({ "content-type": "application/json" }),
           body: chatBody(messages, tools, systemPrompt, config),
           signal
         });
@@ -164,7 +178,7 @@ export function createServerProvider(): CopilotProvider {
       try {
         res = await fetch(`${base}/api/ai/chat/stream`, {
           method: "POST",
-          headers: { "content-type": "application/json", accept: "text/event-stream" },
+          headers: runHeaders({ "content-type": "application/json", accept: "text/event-stream" }),
           body: chatBody(messages, tools, systemPrompt, config),
           signal
         });
