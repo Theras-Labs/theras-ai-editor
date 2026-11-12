@@ -4,57 +4,19 @@ Theras AI is a 3D world editor that runs in the browser. You say what you want i
 
 Theras AI is developed and maintained by Theras Labs, Inc. It is open source under the MIT License. The project combines its editor, runtime and tooling with an AI harness, a resource library, provider integrations and game mode.
 
-## Procedural: full code, no asset files
+## Procedural by prompt: full code, no asset files
 
-![A flight through a container port at dusk in the rain](docs/media/port-yard.gif)
-
-Everything in this scene is made by code: 47 shipping containers, a steel shed, a quay crane, a ship, a forklift, cones, drums, wet ground with puddles that mirror the scene, rain and the sky. There is no image file, no model file and no download. Geometry comes from functions. Paint, rust, dirt, logos and labels are drawn by shaders.
-
-**Credit: Claude Fable 5.2 wrote this procedural scene and its asset kit.** It is a public claude.ai artifact. Theras AI runs that code inside the editor, makes each asset a library entry, and uses the same surfaces for the objects that the AI models.
-
-![The same view as shaded surfaces and as triangles](docs/media/port-triangles.gif)
-
-The same view, shaded and as triangles: about 950,000 triangles and 94 surfaces, all generated when the scene opens.
-
-| | |
-|---|---|
-| ![The port yard in the editor](docs/media/port-editor.jpg) | ![The port yard from above](docs/media/port-overview.jpg) |
-| **Template.** "Port yard at dusk" is the first template in the gallery (group "Procedural: full code"). One click builds the yard, the sky and the screen effects. | **The whole place.** Three lanes of stacks, the shed, the quay with the crane and the ship. The fenced land is 80 by 60 m. |
-| ![Cones, a cabinet and puddles](docs/media/port-cones-puddles.jpg) | ![First person view in game mode](docs/media/port-game-mode.jpg) |
-| **Wet ground.** One depth value gives damp ground, soaked ground and puddles. Puddles mirror the scene with a picture that is drawn each frame. | **Walk it.** Game mode uses the yard's own collision boxes for each container, wall and stair. |
-| ![A drone and a robot hound in the yard](docs/media/port-drone-hound.jpg) | ![The library with the Procedural filter](docs/media/port-library-procedural.jpg) |
-| **Machines.** A drone with turning rotors, a robot hound and a rifle are library entries too. | **Library.** The filter "Procedural" shows what is made by code (169 entries). "Sample files" shows what comes from model and image files (472 entries). |
-
-### Three ways to use it
-
-1. **Open the template.** Templates, then "Port yard at dusk". The scene stays editable, and one undo removes it.
-2. **Place the assets.** 39 procedural entries are in the library: containers of 20 and 40 ft, a concrete barrier, a traffic cone, a forklift, a flood light stand, a light mast, drums, pallets, crates, a guard booth, fence panels, a generator, a rifle, a drone, a robot hound and more. Say "add a 40 ft shipping container here" or use the library panel.
-3. **Model new objects with the same surfaces.** An object that is not in the library is modeled from parts by the AI. Each color of its palette now names a substance (paint, metal, rubber, glass, wood, brass and 18 more). Code gives each part the shader-drawn surface of that substance and puts a chamfer on each box edge.
+When you ask for something in the chat, Theras AI can build it fully in code: geometry from functions, and paint, rust, dirt and wet shine from shaders. There is no image file, no model file and no download. The aim is a result that looks made, not a stack of flat colored blocks.
 
 ![A red gas pump that the AI modeled](docs/media/port-ai-modeled-pump.jpg)
 
-The prompt was "add a vintage red gas pump here, realistic". The model wrote 29 parts and six palette roles in 31 s. The chipped paint, the steel frame, the rubber hose and the wet shine come from the surface kit, not from the model's own colors.
+A prompt result. The prompt was "add a vintage red gas pump here, realistic". The model wrote 29 parts and named a substance for each color (paint, metal, rubber, glass, brass) in 31 s. Code then gave each part its shader-drawn surface and a chamfer on each box edge. The chipped paint, the steel frame and the rubber hose come from the surface kit, not from colors that the model picked.
 
-### Why it does not look like flat blocks
+![The same view as shaded surfaces and as triangles](docs/media/port-triangles.gif)
 
-These rules come from the kit. The modeler prompt and the build code use them.
+The quality target. Everything in this scene is made by code: 47 shipping containers, a steel shed, a quay crane, a ship, a forklift, cones, drums, wet ground with puddles that mirror the scene, rain and the sky. The picture shows the same view as shaded surfaces and as triangles: about 950,000 triangles and 94 surfaces, all generated when the scene opens. Prompt builds use the same surface kit, and each asset of this scene is a library entry that a prompt can place ("add a 40 ft shipping container here").
 
-- **A surface has five layers:** a base, a large variation, a middle mottle, a fine grain and a wear layer. One height field gives the normal map. Each feature changes color, roughness and metalness together.
-- **Paint is a stack:** steel, rust, a primer ring, paint, dirt and chalk. Damage is in clusters, and most of the area stays clean. Rust runs go down.
-- **Form has three scales:** the body, sub-parts of 5 to 50 cm, and fasteners of 0.5 to 3 cm.
-- **Each box edge has a chamfer.** A long part is a profile that is extruded or turned on a lathe, not a box.
-- **Sizes are real.** Textures are in meters for each tile. A container is 12.19 x 2.59 x 2.44 m.
-- **Text is a decal:** stencil numbers, logos and hazard signs sit on the surface and are worn.
-- **Light has one key:** a low warm sun, and the sky as the fill. Lamps are very bright values with a weak bloom, so only they glow.
-
-| Part | Where |
-|---|---|
-| The scene code of Claude Fable 5.2, as one lazy module (210 KB compressed) | `apps/editor/src/vendor/port` |
-| The kit, the 39 entries, the yard and the sky | `apps/editor/src/lib/resources/port` |
-| Substances for modeled objects | `apps/editor/src/lib/generators/parts/surfaces.ts` |
-| Code or files: the rule for each library entry | `apps/editor/src/lib/resources/make.ts` |
-
-The pictures in this section are captures of the 3D view of the editor (`apps/editor`, port 8080), taken on 2026-11-12. The Browser pane that took them was hidden, so the motion in the first picture is a time-lapse of 16 camera positions.
+How the procedural generation works, what it can do today and what is still below the target: [docs/procedural-generation.md](docs/procedural-generation.md).
 
 ## What it builds
 
@@ -142,37 +104,6 @@ The plan, the cause of each failure and the measured times are in `docs/plans/re
 | Image | Attach an image, a video, a code file or a `.glb` to the prompt. | The brief reads era, style, role colors and vegetation from an image. A video becomes a few frames. A model becomes an outline of its parts. |
 | Point | Select an object, drag an object or a dock slot into the prompt, or stand at the place in game mode and say "here". | A ring in the viewport shows where the build starts while the model thinks. The build then rises step by step. |
 | Project folder | Write `import /path/to/project` in the prompt, or use Templates. | The server scans the folder. Models become library entries and a known project gets its place rebuilt. See `apps/editor/src/lib/projects/README.md`. |
-
-## The library: local samples
-
-The library is the first source for every build. The AI searches it before it builds anything new. It has 641 entries. The panel separates them: 169 are procedural (made by code only) and 472 come from sample files (models and images). The local entries work with no network.
-
-| Family | Entries | Source and license |
-|---|---|---|
-| Island set: terrain, landmarks, features, garden plants | 63 | The author's island kit, code-built |
-| Base trees and bush | 8 | Tree kit of folio-2025, MIT, (c) 2025 Bruno Simon |
-| Nature: painted trees, pine, palm, flowers, grass, rocks | 21 | The author's painted vegetation vegetation, code-built |
-| City kits: commercial and industrial buildings, streets | 81 | Kenney, CC0; streets are code-built |
-| Castle, fantasy village, modular buildings | 260 | Kenney, CC0 |
-| Water | 9 | Stylized water, MIT, (c) 2025 MatrixRex, (c) 2026 norio |
-| Skies | 14 | Code-built skies; 3 photo skies from Poly Haven, CC0 |
-| Creatures, people, vehicles | 36 | The author's models |
-| Generated: roads, river, architecture, interior, parts | 4 | Code generators with params |
-| Places, game, blocks | 8 | Project places, a player start, primitive blocks |
-
-Also local:
-
-- **Playbooks** for four scene types (harbor, camp, garden, shrine): a palette, a focal object, rules and one example. `apps/editor/src/lib/copilot/playbooks`
-- **Templates**: cozy island, spring meadow, night harbor, empty island, two project places and a blank scene. `apps/editor/src/lib/resources/templates.ts`
-- **Your own kits**: copy a kit folder and add two table rows. `apps/editor/public/library/README.md`
-
-## External samples
-
-| Source | Status | How |
-|---|---|---|
-| Poly Haven HDR skies (CC0) | Works | The file is fetched from the source host when the sky is used. |
-| A project folder on your computer | Works | Project import (see above). |
-| Scanned objects from Hugging Face (CC BY 4.0) | Works | 713 photo scans of real products at real size. See below. |
 
 ### Scanned objects (Hugging Face)
 

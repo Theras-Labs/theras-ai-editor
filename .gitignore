@@ -7,3 +7,6 @@ coverage
 samples
 .env.local
 .env.*.local
+
+# Working plans that are not ready to publish
+docs/plans/private/
