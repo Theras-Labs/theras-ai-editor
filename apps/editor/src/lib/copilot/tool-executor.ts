@@ -61,6 +61,7 @@ import { buildSlotStore, removeSlot, upsertSlot } from "@/lib/build-slots/store"
 import { placeRecipe } from "@/lib/build-slots/runner";
 import { isSlotIcon, type RecipeMaterial, type RecipePart } from "@/lib/build-slots/types";
 import { getResource, searchResourcesScored } from "@/lib/resources/catalog";
+import { assetMake } from "@/lib/resources/make";
 import { placeResource, placeResourceBatch, BATCH_REVEAL_STAGGER_MS } from "@/lib/resources/place";
 import { mediumOf, solveLayout, LAYOUT_MAX_COUNT, type LayoutItem, type LayoutSpec } from "@/lib/resources/layout";
 import { presetValues } from "@/lib/post-fx";
@@ -476,6 +477,8 @@ function executeToolInner(editor: EditorCore, name: string, args: Args, context:
           kind: e.kind,
           score,
           source: e.source,
+          // "code" = built by code only; "files" = loads a model, image or download.
+          make: assetMake(e),
           origin: e.origin,
           footprint: e.footprint,
           description: e.description

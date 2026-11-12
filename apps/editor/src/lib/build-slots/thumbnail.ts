@@ -4,12 +4,15 @@
 // gets a new icon automatically.
 import * as THREE from "three";
 import { getResource } from "@/lib/resources/catalog";
+import { setPortTextureSize } from "@/lib/resources/port/kit";
+import type { ResourceInstance } from "@/lib/resources/types";
 import type { BuildSlot, SlotRecipe } from "./types";
 
 const SIZE = 128;
 let renderer: THREE.WebGLRenderer | null = null;
 const cache = new Map<string, string>();
 
+/** The shared offscreen renderer. Port surfaces drawn for it are small: an icon is 128 px. */
 function getRenderer() {
   if (!renderer) {
     const canvas = document.createElement("canvas");
@@ -19,6 +22,7 @@ function getRenderer() {
     renderer.setPixelRatio(1);
     renderer.setSize(SIZE, SIZE, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    setPortTextureSize(renderer, 256);
   }
   return renderer;
 }
@@ -62,30 +66,26 @@ export function slotPreviewKey(slot: BuildSlot): string | null {
   return null;
 }
 
-/** Renders a slot preview to a PNG data URL, or null when the slot has nothing to show. */
-export function renderSlotPreview(slot: BuildSlot): string | null {
-  const key = slotPreviewKey(slot);
-  if (!key) return null;
-  const cached = cache.get(key);
-  if (cached) return cached;
+// Previews of objects that build later (a GLB that loads, a port prop whose surfaces the
+// graphics card draws) are empty at the first draw. They are drawn again when the instance is
+// ready, and the listeners of that key hear about the new picture.
+const listeners = new Map<string, Set<(url: string) => void>>();
+/** Keys whose second picture is pending: a second call does not build the object again. */
+const pending = new Set<string>();
 
-  let object: THREE.Object3D | null = null;
-  let dispose: (() => void) | undefined;
-  if (slot.kind === "resource" && slot.resourceId) {
-    const entry = getResource(slot.resourceId);
-    if (!entry?.create) return null;
-    try {
-      const instance = entry.create(7, { appear: false });
-      object = instance.object;
-      dispose = instance.dispose;
-    } catch {
-      return null;
-    }
-  } else if (slot.recipe) {
-    object = recipeObject(slot.recipe);
-  }
-  if (!object) return null;
+/** Calls back once the late picture of this key is in the cache. Returns the unsubscribe. */
+export function subscribeSlotPreview(key: string, callback: (url: string) => void): () => void {
+  let set = listeners.get(key);
+  if (!set) listeners.set(key, (set = new Set()));
+  set.add(callback);
+  return () => {
+    set.delete(callback);
+    if (set.size === 0 && listeners.get(key) === set) listeners.delete(key);
+  };
+}
 
+/** Draws the object framed at a three-quarter view. null when it has no visible bounds yet. */
+function drawObject(object: THREE.Object3D): string | null {
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight("#e8f2ff", "#5b5040", 1.6));
   const sun = new THREE.DirectionalLight("#fff2dc", 2.2);
@@ -94,30 +94,84 @@ export function renderSlotPreview(slot: BuildSlot): string | null {
   scene.add(object);
   object.updateMatrixWorld(true);
 
-  const box = new THREE.Box3().setFromObject(object);
-  if (box.isEmpty()) return null;
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const radius = Math.max(size.x, size.y, size.z) * 0.62 + 0.05;
-  const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 200);
-  const dir = new THREE.Vector3(1, 0.75, 1.25).normalize();
-  camera.position.copy(center).addScaledVector(dir, radius / Math.sin(THREE.MathUtils.degToRad(15)));
-  camera.lookAt(center);
+  try {
+    const box = new THREE.Box3().setFromObject(object);
+    if (box.isEmpty()) return null;
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.y, size.z) * 0.62 + 0.05;
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 200);
+    const dir = new THREE.Vector3(1, 0.75, 1.25).normalize();
+    camera.position.copy(center).addScaledVector(dir, radius / Math.sin(THREE.MathUtils.degToRad(15)));
+    camera.lookAt(center);
 
-  const r = getRenderer();
-  r.setClearColor(0x000000, 0);
-  r.render(scene, camera);
-  const url = r.domElement.toDataURL("image/png");
+    const r = getRenderer();
+    r.setClearColor(0x000000, 0);
+    r.render(scene, camera);
+    return r.domElement.toDataURL("image/png");
+  } finally {
+    scene.remove(object);
+  }
+}
 
-  scene.remove(object);
+function disposeRecipeObject(object: THREE.Object3D) {
   object.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (mesh.isMesh && slot.kind !== "resource") {
+    if (mesh.isMesh) {
       mesh.geometry.dispose();
       (mesh.material as THREE.Material).dispose();
     }
   });
-  dispose?.();
-  cache.set(key, url);
+}
+
+/**
+ * Renders a slot preview to a PNG data URL, or null when the slot has nothing to show yet.
+ * A library object that builds later returns null now; subscribeSlotPreview hears its picture.
+ */
+export function renderSlotPreview(slot: BuildSlot): string | null {
+  const key = slotPreviewKey(slot);
+  if (!key) return null;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  if (pending.has(key)) return null;
+
+  if (slot.kind === "resource" && slot.resourceId) {
+    const entry = getResource(slot.resourceId);
+    if (!entry?.create) return null;
+    let instance: ResourceInstance;
+    try {
+      instance = entry.create(7, { appear: false, renderer: getRenderer() });
+    } catch {
+      return null;
+    }
+    const url = drawObject(instance.object);
+    if (url || !instance.ready) {
+      instance.dispose?.();
+      if (url) cache.set(key, url);
+      return url;
+    }
+    // Keep the instance until its second picture, then dispose it, also when ready fails.
+    pending.add(key);
+    const ready = instance.ready;
+    void ready
+      .then(() => {
+        const late = drawObject(instance.object);
+        if (!late) return;
+        cache.set(key, late);
+        for (const callback of [...(listeners.get(key) ?? [])]) callback(late);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        pending.delete(key);
+        instance.dispose?.();
+      });
+    return null;
+  }
+
+  if (!slot.recipe) return null;
+  const object = recipeObject(slot.recipe);
+  const url = drawObject(object);
+  disposeRecipeObject(object);
+  if (url) cache.set(key, url);
   return url;
 }

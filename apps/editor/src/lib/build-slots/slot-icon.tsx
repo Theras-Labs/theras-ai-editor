@@ -1,7 +1,7 @@
 // The picture on a dock slot: an AI or user symbol (cleaned SVG), else a 3D render of the
 // slot's object, else the built-in fallback icon while the render is not ready.
 import { useEffect, useState, type ReactNode } from "react";
-import { renderSlotPreview, slotPreviewKey } from "./thumbnail";
+import { renderSlotPreview, slotPreviewKey, subscribeSlotPreview } from "./thumbnail";
 import type { BuildSlot } from "./types";
 
 const ALLOWED_TAGS = new Set(["path", "circle", "rect", "line", "polyline", "polygon", "ellipse", "g"]);
@@ -63,6 +63,10 @@ export function SlotIcon({ slot, fallback, className }: { slot: BuildSlot; fallb
   useEffect(() => {
     if (slot.iconSvg || !key) return;
     let cancelled = false;
+    // An object that builds later (a model that loads, a port prop) sends its picture here.
+    const unsubscribe = subscribeSlotPreview(key, (late) => {
+      if (!cancelled) setUrl(late);
+    });
     schedule(() => {
       if (cancelled) return;
       const result = renderSlotPreview(slot);
@@ -70,6 +74,7 @@ export function SlotIcon({ slot, fallback, className }: { slot: BuildSlot; fallb
     });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
     // key covers the recipe or library id
     // eslint-disable-next-line react-hooks/exhaustive-deps

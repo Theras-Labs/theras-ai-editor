@@ -7,17 +7,22 @@ import type { SlotIcon } from "@/lib/build-slots/types";
 import { RESOURCES, searchResources } from "@/lib/resources/catalog";
 import { SCANNED_TAG, isScannedId } from "@/lib/resources/external/scanned";
 import { scannedTotal, searchScanned } from "@/lib/resources/external/scanned-search";
+import { assetMake, countByMake, makeLabel, type AssetMake } from "@/lib/resources/make";
+import { PROCEDURAL_TAG } from "@/lib/resources/port";
 import { placeResource, resourceIdsInScene } from "@/lib/resources/place";
 import { aiContextDrag } from "@/lib/ai-context";
 import type { ResourceEntry, ResourceKind, ResourceSource } from "@/lib/resources/types";
 
-type Filter = { label: string; kind?: ResourceKind; source?: ResourceSource; tag?: string };
+type Filter = { label: string; kind?: ResourceKind; source?: ResourceSource; tag?: string; make?: AssetMake };
 
 /** The user stopped typing for this long: one search request goes to the Theras server. */
 const SCANNED_SEARCH_DELAY_MS = 350;
 
 const FILTERS: Filter[] = [
   { label: "All" },
+  // How the entry is made (resources/make.ts): by code only, or from model and picture files.
+  { label: "Procedural", make: "code" },
+  { label: "Sample files", make: "files" },
   { label: "Buildings", kind: "building" },
   { label: "Landmarks", kind: "landmark" },
   { label: "Features", kind: "feature" },
@@ -56,6 +61,16 @@ function iconFor(entry: ResourceEntry): SlotIcon {
   return KIND_ICON[entry.kind];
 }
 
+/**
+ * With no query, the entries made by code only (tag "procedural") come first and the rest keep
+ * their order. With a query, the search order is kept: the best match must stay on top.
+ */
+function proceduralFirst(entries: ResourceEntry[], query: string): ResourceEntry[] {
+  if (query.trim()) return entries;
+  const procedural = entries.filter((e) => e.tags.includes(PROCEDURAL_TAG));
+  return [...procedural, ...entries.filter((e) => !e.tags.includes(PROCEDURAL_TAG))];
+}
+
 /** Puts the entry in the dock (reusing a slot that already holds it) and makes it active. */
 function useInDock(entry: ResourceEntry) {
   const slots = buildSlotStore.slots;
@@ -80,7 +95,8 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
   // user stops typing (2 letters or more) or opens the "Scanned" filter. Nothing is asked while
   // the panel is idle. The results are library entries after that, so the search below finds them.
   const [scannedTick, setScannedTick] = useState(0);
-  const wantsScanned = filter.tag === SCANNED_TAG || (query.trim().length >= 2 && !filter.kind);
+  // Scanned objects are files, so the "Procedural" filter never asks for them.
+  const wantsScanned = filter.tag === SCANNED_TAG || (query.trim().length >= 2 && !filter.kind && filter.make !== "code");
   useEffect(() => {
     if (!wantsScanned) return;
     let alive = true;
@@ -97,6 +113,12 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
   const inScene = useMemo(() => new Set([...resourceIdsInScene()].filter(isScannedId)), [scannedTick, message, filter, query]);
   const results = useMemo(() => {
     const tag = filter.tag;
+    if (filter.make || (!tag && !filter.kind && !filter.source)) {
+      // "All", "Procedural" and "Sample files" reorder or cut the matches, so the search returns
+      // all of them first; the cards stay at 200 as before.
+      const found = searchResources(query, {}, 2000).filter((e) => !filter.make || assetMake(e) === filter.make);
+      return proceduralFirst(found, query).slice(0, 200);
+    }
     const found = searchResources(query, { kind: filter.kind, source: tag ? "external" : filter.source }, 200);
     if (!tag) return found;
     const tagged = found.filter((e) => e.tags.includes(tag));
@@ -104,6 +126,7 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
   }, [filter, query, scannedTick, inScene]);
   const localCount = RESOURCES.filter((e) => e.source === "local").length;
   const externalCount = RESOURCES.length - localCount;
+  const makeCount = useMemo(() => countByMake(RESOURCES), []);
   const scannedCount = scannedTotal();
 
   const act = (entry: ResourceEntry) => {
@@ -129,7 +152,7 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
         <div className="flex-1">
           <div className="text-sm font-bold text-white/90">Resource library</div>
           <div className="text-[11px] text-white/45">
-            {localCount} local, {externalCount} external, by category.
+            {localCount} local, {externalCount} external, by category. {makeCount.code} procedural, {makeCount.files} sample files.
             {scannedCount > 0 ? ` ${scannedCount} scanned objects by search.` : ""}
           </div>
         </div>
@@ -180,6 +203,13 @@ export function ResourceLibraryPanel({ onClose }: { onClose: () => void }) {
                 }`}
               >
                 {entry.source}
+              </span>
+              <span
+                className={`rounded-full px-1.5 py-px text-[9px] font-bold uppercase ${
+                  assetMake(entry) === "code" ? "bg-[#efe3f7] text-[#8a4fb0]" : "bg-[#f3ead8] text-[#9a6a1f]"
+                }`}
+              >
+                {makeLabel(assetMake(entry))}
               </span>
             </div>
             <span className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
