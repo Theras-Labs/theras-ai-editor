@@ -34,6 +34,22 @@ export type ResourceInstance = {
   ready?: Promise<unknown>;
 };
 
+/**
+ * A sky that an entry builds by itself (not the Island kit sky): the dome and the lights
+ * in `object`, and the values that the viewport sets on the scene while the sky is active.
+ */
+export type SkyInstance = {
+  object: THREE.Object3D;
+  fog?: THREE.Fog | THREE.FogExp2 | null;
+  /** Image-based light. null until it is ready. */
+  environment?: THREE.Texture | null;
+  environmentIntensity?: number;
+  /** Tone mapping exposure for this sky (default 1). */
+  exposure?: number;
+  update?: (camera: THREE.Camera, dt: number) => void;
+  dispose: () => void;
+};
+
 /** Values an environment entry gives to the scene while it is active. */
 export type EnvironmentParams = {
   /** 0..1 time of day: 0.25 sunrise, 0.5 noon, 0.75 sunset. */
@@ -70,7 +86,8 @@ export type ResourceEntry = {
   footprint: number;
   /** Placeable objects. appear = true when the object was just placed (play its own entry animation). */
   /** params = the node's metadata.params (parametric entries: a river path, a parts spec, a tier count). */
-  create?: (seed: number, opts?: { appear?: boolean; params?: Record<string, unknown> }) => ResourceInstance;
+  /** renderer = the renderer that will draw the object (entries that draw their own textures on the graphics card need it). */
+  create?: (seed: number, opts?: { appear?: boolean; params?: Record<string, unknown>; renderer?: THREE.WebGLRenderer }) => ResourceInstance;
   /** Node name for a placement with this seed (default: the entry name). */
   nameFor?: (seed: number) => string;
   /** The object animates its own appearance (plants grow), so the editor does not rise it in. */
@@ -79,6 +96,8 @@ export type ResourceEntry = {
   recipe?: SlotRecipe;
   /** Environments. */
   environment?: EnvironmentParams;
+  /** A sky built by the entry itself (kind "sky"). The viewport adds it and sets its values on the scene. */
+  sky?: (opts: { renderer: THREE.WebGLRenderer }) => SkyInstance;
   /** External file. */
   url?: string;
 };

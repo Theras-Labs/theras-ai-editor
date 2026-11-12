@@ -64,16 +64,18 @@ export function ResourceNodeObject({
   // Rise start in performance.now() time (honors a reveal delay, so templates build in order).
   const spawnRef = useRef<number | null>(justPlaced && !entry?.selfAnimates ? (revealStartOf(group.nodeId) ?? performance.now()) : null);
 
+  // The renderer of this viewport: entries that draw their textures on the graphics card need it.
+  const gl = useThree((state) => state.gl);
   const instance = useMemo(() => {
     if (!entry?.create) return null;
     if (justPlaced) nudgeAnimation(2500);
     try {
-      return entry.create(seed, { appear: justPlaced, params });
+      return entry.create(seed, { appear: justPlaced, params, renderer: gl });
     } catch (error) {
       console.warn(`[resources] could not build ${resourceId}:`, error);
       return null;
     }
-  }, [entry, justPlaced, params, resourceId, seed]);
+  }, [entry, gl, justPlaced, params, resourceId, seed]);
 
   useEffect(() => () => instance?.dispose?.(), [instance]);
 
@@ -184,6 +186,35 @@ export function EnvironmentObject({ group }: { group: DerivedGroupMarker }) {
     scene.background = null;
     lh.update(camera);
     gl.toneMappingExposure = 1;
+  });
+
+  // A sky that the entry builds by itself (its own dome, sun and environment map).
+  const custom = useMemo(() => (entry?.sky ? entry.sky({ renderer: gl }) : null), [entry, gl]);
+  useEffect(() => {
+    if (!custom) return;
+    scene.add(custom.object);
+    const before = { fog: scene.fog, environment: scene.environment, intensity: scene.environmentIntensity, exposure: gl.toneMappingExposure };
+    return () => {
+      scene.remove(custom.object);
+      if (scene.fog === custom.fog) scene.fog = before.fog ?? null;
+      if (scene.environment === custom.environment) {
+        scene.environment = before.environment;
+        scene.environmentIntensity = before.intensity;
+      }
+      gl.toneMappingExposure = before.exposure;
+      custom.dispose();
+    };
+  }, [custom, gl, scene]);
+  useFrame((_, dt) => {
+    if (!custom) return;
+    if (custom.fog !== undefined) scene.fog = custom.fog;
+    scene.background = null;
+    if (custom.environment) {
+      scene.environment = custom.environment;
+      scene.environmentIntensity = custom.environmentIntensity ?? 1;
+    }
+    custom.update?.(camera, dt);
+    gl.toneMappingExposure = custom.exposure ?? 1;
   });
 
   return null;

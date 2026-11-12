@@ -14,6 +14,8 @@ import { LH_FEATURE_ENTRIES, LH_LANDMARK_ENTRIES } from "./little-habitats/props
 import { GENERATED_ENTRIES } from "./generated";
 import { ALLEY_ARENA_ENTRIES } from "./environments/alley-arena";
 import { DESERT_WORLD_ENTRIES } from "./environments/desert-world";
+import { PORT_PLACE_ENTRIES, PORT_PROP_ENTRIES, PORT_SKY_ENTRIES } from "./port";
+import { PORT_ACTOR_ENTRIES } from "./port/actors";
 import { getScannedEntry, scannedEntries, scannedScore } from "./external/scanned";
 import type { ResourceEntry, ResourceKind, ResourceSource } from "./types";
 
@@ -104,6 +106,10 @@ const ALL_RESOURCES: ResourceEntry[] = [
   ...PUDDLE_ENTRIES,
   ...ALLEY_ARENA_ENTRIES,
   ...DESERT_WORLD_ENTRIES,
+  ...PORT_PLACE_ENTRIES,
+  ...PORT_SKY_ENTRIES,
+  ...PORT_PROP_ENTRIES,
+  ...PORT_ACTOR_ENTRIES,
   ...KIT_ENTRIES,
   ...VEHICLE_ENTRIES,
   // The rigged human comes before the creatures: "a person" or "a character" finds it first.

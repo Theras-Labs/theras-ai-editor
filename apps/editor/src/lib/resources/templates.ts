@@ -13,7 +13,11 @@ import { adapterOf, projectStore, type ImportedProject } from "@/lib/projects/pr
 import { uiStore } from "@/state/ui-store";
 import { projectSessionStore } from "@/state/project-session-store";
 import { slugifyProjectName } from "@theras/dev-sync";
+import type { ScenePostFx } from "@theras/shared";
+import { POST_FX_OFF, setScenePostFx } from "@/lib/post-fx";
 import { starterIslandSurface, type StarterShape } from "./little-habitats/terrain";
+import { PORT_SKY_ID, PORT_YARD_ID } from "./port";
+import { YARD_START } from "./port/yard";
 
 type Vec = { x: number; y: number; z: number };
 
@@ -35,9 +39,31 @@ export type SceneTemplate = {
   island?: { seed: number; shape: StarterShape };
   /** Objects to place: resource id and how many, and where on the land. */
   objects: { resource: string; count?: number; spot: "top" | "coast" | "land" | "center" }[];
+  /** Screen effects of the scene (bloom, grade, vignette, grain). Written to the scene settings. */
+  postFx?: Partial<ScenePostFx>;
 };
 
+/** The gallery section of scenes that are made by code only: no image, no model file. */
+export const PROCEDURAL_GROUP = "Procedural: full code";
+
 export const SCENE_TEMPLATES: SceneTemplate[] = [
+  {
+    id: "port-yard",
+    name: "Port yard at dusk",
+    group: PROCEDURAL_GROUP,
+    description:
+      "A container port at dusk in the rain: 47 containers along three lanes, a steel shed, a quay with a crane and a ship, wet ground with puddles that mirror the scene. Every asset is made by code. Walk it in game mode.",
+    preview: "linear-gradient(160deg,#27333f 0%,#55616c 32%,#d99a5b 52%,#3b3f44 70%,#16191c 100%)",
+    sky: PORT_SKY_ID,
+    environment: { resource: PORT_YARD_ID, name: "Port yard" },
+    // The first view of the original scene: at the gate, down the main lane toward the low sun.
+    camera: YARD_START,
+    objects: [],
+    // The original film chain (bloom with no threshold and a small mix, an S-curve, vignette,
+    // grain), as near as the editor's screen effects get to it. The sun and the lamps are very
+    // bright values, so the bloom is weak: only they glow. Set by eye against the original scene.
+    postFx: { bloom: 0.045, bloomThreshold: 1.1, bloomRadius: 0.8, contrast: 0.16, saturation: 0.1, warmth: 0, vignette: 0.32, grain: 0.03 }
+  },
   {
     id: "cozy-island",
     name: "Cozy island",
@@ -126,7 +152,7 @@ export const SCENE_TEMPLATES: SceneTemplate[] = [
     preview: "linear-gradient(160deg,#f6dcb0 0%,#e9b77c 45%,#c98a52 75%,#8b5a3a 100%)",
     sky: "lh:sky:summer_noon",
     environment: { resource: "env:desert-ruins", name: "Desert world" },
-    // The game's landing site, looking at the mesas and the giant's hand.
+    // The original code's landing site, looking at the mesas and the giant's hand.
     camera: { position: { x: -174.5, y: 2.4, z: 41.1 }, target: { x: 0, y: 4, z: 0 } },
     objects: []
   },
@@ -371,6 +397,8 @@ export function applyTemplate(editor: EditorCore, id: string, replace = true): {
     setProject(after);
     trackProjectSwitch(editor, { label, before, after, done: true }, setProject);
   }
+  // The template's screen effects go to the scene settings (their own undo step).
+  if (template.postFx) setScenePostFx(editor, { ...POST_FX_OFF, ...template.postFx, enabled: true, preset: "template" });
   // Objects rise in one after another while the island builds.
   objectIds.forEach((nodeId, i) => markBuildReveal([nodeId], 900 + i * 90));
   frameTemplate(template);

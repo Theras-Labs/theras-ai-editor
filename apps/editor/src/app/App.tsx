@@ -42,7 +42,9 @@ import { toggleAskTheras } from "@/state/ask-theras";
 import { frameForSite, largestTarget } from "@/lib/copilot/frame-site";
 import { setSceneBridge } from "@/lib/saved-scenes";
 import { readSites } from "@/lib/copilot/director/site";
-import { vec3 } from "@theras/shared";
+import { vec3, type ScenePostFx } from "@theras/shared";
+import { POST_FX_OFF, setScenePostFx } from "@/lib/post-fx";
+import { livePortSkies } from "@/lib/resources/port/sky";
 import { projectSessionStore } from "@/state/project-session-store";
 import { sceneSessionStore } from "@/state/scene-session-store";
 import { toolSessionStore } from "@/state/tool-session-store";
@@ -493,7 +495,17 @@ export function App() {
   // Test handle for local runs only: a test script can read the scene and move the camera.
   useEffect(() => {
     if (!/^(localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+\.localhost)$/.test(window.location.hostname)) return;
-    (window as unknown as { __therasDebug?: unknown }).__therasDebug = { editor, ui: uiStore, place: placeResource, game: gameStore, playerPose, project: projectSessionStore };
+    (window as unknown as { __therasDebug?: unknown }).__therasDebug = {
+      editor,
+      ui: uiStore,
+      place: placeResource,
+      game: gameStore,
+      playerPose,
+      project: projectSessionStore,
+      // Look tuning in a local test: the scene's screen effects and the live procedural skies.
+      setPostFx: (fx: Partial<ScenePostFx>) => setScenePostFx(editor, { ...POST_FX_OFF, ...(editor.scene.settings.world.postFx ?? {}), ...fx, enabled: true }),
+      portSkies: livePortSkies
+    };
   }, [editor]);
 
   const handleToggleLogicViewer = () => {

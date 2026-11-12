@@ -12,11 +12,12 @@ import type { EditorCore } from "@theras/editor-core";
 import { Button } from "@/components/ui/button";
 import { readAttachment, type CopilotAttachment } from "@/lib/copilot/attachments";
 import { describeImport, importProject, projectFileUrl, projectStore, type ImportedProject } from "@/lib/projects/projects";
-import { SCENE_TEMPLATES, applyTemplate, projectTemplates, templateAvailable, type SceneTemplate } from "@/lib/resources/templates";
+import { PROCEDURAL_GROUP, SCENE_TEMPLATES, applyTemplate, projectTemplates, templateAvailable, type SceneTemplate } from "@/lib/resources/templates";
 import { uiLayoutStore } from "@/state/ui-layout-store";
 
-const GROUP_ORDER = ["Your projects", "Island kit", "Desert", "Alley arena", "Start"];
+const GROUP_ORDER = [PROCEDURAL_GROUP, "Your projects", "Island kit", "Desert", "Alley arena", "Start"];
 const GROUP_NOTE: Record<string, string> = {
+  [PROCEDURAL_GROUP]: "Made by code only: no image file, no model file, no download. Written by Claude Fable 5.2.",
   "Your projects": "Imported from a folder on this computer. The place is rebuilt from the project's own files.",
   "Island kit": "Editable islands: shape the land with Soil, Stone and Water.",
   Desert: "Desert worlds. Import the project folder to send its reference views to Ask Theras.",
