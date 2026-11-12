@@ -4,6 +4,10 @@ This document tells you how Theras AI builds an object or a place fully in code 
 
 Folder: all paths start at the repository root. The editor is `apps/editor` (port 8080).
 
+![A flight through a container port at dusk in the rain](media/port-yard.gif)
+
+A flight through the procedural port scene in the editor. Every object, the wet ground, the rain and the sky are made by code. The motion is a time-lapse of 16 camera positions.
+
 ## What "procedural" means here
 
 - Geometry comes from functions: boxes with chamfers, lathes, extruded profiles, tubes.
@@ -11,6 +15,10 @@ Folder: all paths start at the repository root. The editor is `apps/editor` (por
 - No image file, no model file and no download is used.
 
 The library panel shows this split: "Procedural" (made by code) and "Sample files" (made from model and image files). The rule is in `apps/editor/src/lib/resources/make.ts`.
+
+![The same view as shaded surfaces and as triangles](media/port-triangles.gif)
+
+The same view as shaded surfaces and as triangles: about 950,000 triangles and 94 surfaces, all generated when the scene opens.
 
 ## From prompt to object
 
@@ -20,6 +28,10 @@ The library panel shows this split: "Procedural" (made by code) and "Sample file
 4. **Build.** Code makes one mesh for each substance and color. A box edge gets a chamfer by default (6% of the thinnest side, 4 to 30 mm). The object appears stage by stage. Code: `apps/editor/src/lib/generators/parts/build.ts`.
 5. **Surfaces.** When the surface kit is ready, each mesh gets the shader-drawn surface of its substance. The mapping uses the position of the surface in space, so a part needs no texture coordinates. Code: `apps/editor/src/lib/resources/generated/parts.ts`.
 6. **Change.** "Bigger", "another color" and "a ring of it around the puddle" use the same model again with no new model call. Code: `apps/editor/src/lib/copilot/director/generators/object.ts`.
+
+![A red gas pump that the AI modeled](media/port-ai-modeled-pump.jpg)
+
+A prompt result: "add a vintage red gas pump here, realistic". 29 parts and six palette roles in 31 s. The paint chips, the steel frame and the rubber hose come from the surface kit.
 
 ## Substances
 
@@ -37,6 +49,19 @@ The kit is the procedural container port that Claude Fable 5.2 wrote (a public c
 - The textures are drawn on the graphics card, so a kit belongs to one renderer.
 
 The same kit builds the 39 procedural library entries, the template "Port yard at dusk" and its sky.
+
+| | |
+|---|---|
+| ![The port yard in the editor](media/port-editor.jpg) | ![The port yard from above](media/port-overview.jpg) |
+| The template "Port yard at dusk" in the editor. | The whole place: three lanes of stacks, the shed, the quay with the crane and the ship. |
+| ![Cones, a cabinet and puddles](media/port-cones-puddles.jpg) | ![Props close up](media/port-props.jpg) |
+| Wet ground: puddles mirror the scene with a picture that is drawn each frame. | Library props in a plain scene: logo, numbers, rust runs, real pallet boards. |
+| ![First person view in game mode](media/port-game-mode.jpg) | ![A drone and a robot hound in the yard](media/port-drone-hound.jpg) |
+| Game mode: the yard has its own collision boxes. | The drone and the robot hound as library entries. |
+
+![The library with the Procedural filter](media/port-library-procedural.jpg)
+
+The library filter "Procedural" shows the entries that are made by code.
 
 ## What is below the target today
 
