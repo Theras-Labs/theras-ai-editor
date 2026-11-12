@@ -368,6 +368,9 @@ export const objectGenerator: Generator = {
       modelNote = `${partCount(spec)} parts (${totalInstances(spec)} pieces with mirrors and repeats)`;
       ctx.step("Parts spec", `${partCount(spec)} parts in ${spec.stages.length} stages, ${seconds} s${prepared.issues.length ? `, ${prepared.issues.length} fixed by the self-check` : ""}`);
     }
+    // The style goes into the stored spec: the library entry gets only the params, and the
+    // style picks the default surface (painted steel or plastic). A reused spec keeps its own.
+    spec = { ...spec, style: reuse && spec.style ? spec.style : style };
     const note = { subject, style };
 
     // 2. One object or copies of it.

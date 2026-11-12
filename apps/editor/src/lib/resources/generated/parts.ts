@@ -2,8 +2,28 @@
 // metadata.params), so one entry can be a river of any shape or an object of any parts list.
 // "gen:parts": an object of the object modeler (src/lib/generators/parts). params = PartsParams
 // { spec, shown?, sizeMeters? }. Without params (library thumbnail) it shows the street lamp example.
-import { EXAMPLE_LAMP, buildFromParams } from "@/lib/generators/parts";
-import type { ResourceEntry } from "../types";
+// With a renderer, the flat-colored object gets the shader-drawn Port surfaces when the kit
+// is ready (the build itself stays synchronous, so a test or a thumbnail without a renderer still
+// gets the flat look).
+import { EXAMPLE_LAMP, buildFromParams, surfaceDef, type MaterialProvider } from "@/lib/generators/parts";
+import { portKit, type PortKit } from "../port/kit";
+import type { ResourceEntry, ResourceFrame } from "../types";
+
+/** Port materials for the parts surfaces. Kit materials are shared and cached: never dispose. */
+function kitProvider(kit: PortKit): MaterialProvider {
+  return (surface, hex) => {
+    const def = surfaceDef(surface);
+    return kit.ctx.mats.get(def.preset, {
+      // Object space mapping: the parts have no UVs.
+      triplanar: true,
+      // The vertex color carries the shade (gradient, ground AO, jitter) only.
+      vertexColors: true,
+      // A wrong outline winding never makes a part disappear (as with the flat material).
+      doubleSide: true,
+      ...(def.tint ? { color: parseInt(hex.slice(1), 16) } : {})
+    });
+  };
+}
 
 export const PARTS_ENTRIES: ResourceEntry[] = [
   {
@@ -22,7 +42,29 @@ export const PARTS_ENTRIES: ResourceEntry[] = [
     selfAnimates: true,
     create: (seed, opts) => {
       const built = buildFromParams(opts?.params?.spec ? opts.params : { spec: EXAMPLE_LAMP }, { appear: opts?.appear, seed });
-      return { object: built.object, update: built.update, dispose: built.dispose };
+      let disposed = false;
+      let kit: PortKit | null = null;
+      const renderer = opts?.renderer;
+      const ready = renderer
+        ? portKit(renderer).then((k) => {
+            if (disposed) return;
+            kit = k;
+            built.applyMaterials(kitProvider(k));
+          })
+        : Promise.resolve();
+      // Without the kit the object keeps its flat colors; that is a usable result, not an error.
+      ready.catch((error) => console.warn("[library] could not load the port surfaces for a modeled object:", error));
+      return {
+        object: built.object,
+        update(frame: ResourceFrame) {
+          built.update?.();
+          kit?.tick(frame.dt);
+        },
+        dispose() {
+          disposed = true;
+          built.dispose();
+        }
+      };
     }
   }
 ];

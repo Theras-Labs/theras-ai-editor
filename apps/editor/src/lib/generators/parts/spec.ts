@@ -3,6 +3,7 @@
 // validateSpec() makes any input safe: wrong types are dropped, numbers are clamped, counts are
 // capped. check.ts then does the geometric self-check (far parts, floating parts).
 import { PALETTES, isPaletteId } from "@/lib/copilot/palettes";
+import { isSurfaceId, type ObjectStyle, type SurfaceId } from "./surfaces";
 
 export type Vec3 = [number, number, number];
 export type Axis = "x" | "y" | "z";
@@ -85,6 +86,14 @@ export type PartsSpec = {
   /** Overall size [width x, height y, depth z] in meters. Origin: ground center; +z is the front. */
   size: Vec3;
   palette: Record<string, string>;
+  /**
+   * Substance of a palette role (role -> surface id). Kept beside `palette` so that code which
+   * reads `palette` as role -> hex is not touched and old specs (no surfaces) stay valid. A role
+   * with no entry gets defaultSurface() at build time.
+   */
+  surfaces?: Record<string, SurfaceId>;
+  /** "toy" or "realistic": picks the default surface. Absent (old specs) = "toy". */
+  style?: ObjectStyle;
   /** Pivot point of each moving group. */
   groups?: Record<string, Vec3>;
   /** Primary forms first, details last. */
@@ -194,6 +203,25 @@ function paletteOf(v: unknown): Record<string, string> {
       if (named) out[role] = named;
     }
   }
+  return out;
+}
+
+/**
+ * Surfaces of the palette roles: from `surface` on each palette item (the tool schema) and from
+ * a stored `surfaces` map (specs on disk). Only roles of the palette and known ids are kept.
+ */
+function surfacesOf(rawPalette: unknown, rawSurfaces: unknown, palette: Record<string, string>, issues: SpecIssue[]): Record<string, SurfaceId> {
+  const out: Record<string, SurfaceId> = {};
+  const take = (role: string, id: unknown) => {
+    if (id === undefined || id === null || id === "") return;
+    const r = role.trim().slice(0, 24);
+    if (!palette[r]) return;
+    const s = typeof id === "string" ? id.trim().toLowerCase() : id;
+    if (isSurfaceId(s)) out[r] = s;
+    else issues.push(`palette role "${r}": unknown surface "${String(id)}", used the default`);
+  };
+  if (Array.isArray(rawPalette)) for (const [role, id] of entriesOf(rawPalette, "surface").slice(0, 12)) take(role, id);
+  for (const [role, id] of entriesOf(rawSurfaces, "surface").slice(0, 12)) take(role, id);
   return out;
 }
 
@@ -378,6 +406,8 @@ export function validateSpec(input: unknown): ValidationResult {
   const name = typeof o.name === "string" && o.name.trim() ? o.name.trim().slice(0, 60) : "Object";
   const size = vec3(o.size, 0.05, LIMITS.maxDim) ?? [1, 1, 1];
   const palette = paletteOf(o.palette);
+  const surfaces = surfacesOf(o.palette, o.surfaces, palette, issues);
+  const style: ObjectStyle | undefined = o.style === "realistic" || o.style === "toy" ? o.style : undefined;
   const groups: Record<string, Vec3> = {};
   for (const [k, v] of entriesOf(o.groups, "pivot").slice(0, 8)) {
     const pivot = vec3(Array.isArray(v) ? v : (v as Record<string, unknown> | null)?.pivot, -LIMITS.coord, LIMITS.coord);
@@ -430,7 +460,18 @@ export function validateSpec(input: unknown): ValidationResult {
   if (total < LIMITS.minParts) return { error: `spec has ${total} valid parts; ${LIMITS.minParts} or more are needed` };
 
   // Roles used but not defined fall back to grey; record them once.
-  return { spec: { name, size, palette, ...(Object.keys(groups).length ? { groups } : {}), stages }, issues };
+  return {
+    spec: {
+      name,
+      size,
+      palette,
+      ...(Object.keys(surfaces).length ? { surfaces } : {}),
+      ...(style ? { style } : {}),
+      ...(Object.keys(groups).length ? { groups } : {}),
+      stages
+    },
+    issues
+  };
 }
 
 export function partCount(spec: PartsSpec) {

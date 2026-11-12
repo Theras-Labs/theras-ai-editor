@@ -4,17 +4,20 @@
 // of surface, not by size") is adapted from the img2threejs skill, Apache-2.0
 // (~/.claude/skills/img2threejs: grimoire/intake/image_analysis.md, grimoire/intake/surface_topology.md,
 // grimoire/build/geometry_patterns.md). The text below is written for this editor; the worked
-// examples are original.
+// examples are original. The SURFACES and QUALITY rules follow the port kit's prop and weapon
+// principles (src/lib/resources/port/kit.ts): real dimensions, three scales of form, profiles
+// for long parts, one story detail; code adds chamfers and wear.
+import { SURFACES, SURFACE_IDS, surfaceIdList } from "./surfaces";
 
 /** A street lamp: lathe base, tapered post, radial repeat, emissive glass, mirrored tubes. */
 export const EXAMPLE_LAMP = {
   name: "Street lamp",
   size: [0.9, 4.4, 0.9],
   palette: [
-    { role: "iron", hex: "#3a3f4a" },
-    { role: "glass", hex: "#ffd98a" },
-    { role: "stone", hex: "#b9b1a6" },
-    { role: "brass", hex: "#c8a24a" }
+    { role: "iron", hex: "#3a3f4a", surface: "paint" },
+    { role: "glass", hex: "#ffd98a", surface: "glass" },
+    { role: "stone", hex: "#b9b1a6", surface: "concrete" },
+    { role: "brass", hex: "#c8a24a", surface: "brass" }
   ],
   stages: [
     {
@@ -51,11 +54,11 @@ export const EXAMPLE_BIPLANE = {
   name: "Biplane",
   size: [9.8, 2.3, 7.2],
   palette: [
-    { role: "body", hex: "#d9624f" },
-    { role: "wing", hex: "#f2e3c6" },
-    { role: "dark", hex: "#3a3f4a" },
-    { role: "metal", hex: "#b9c2cc" },
-    { role: "glass", hex: "#2f4858" }
+    { role: "body", hex: "#d9624f", surface: "paint" },
+    { role: "wing", hex: "#f2e3c6", surface: "fabric" },
+    { role: "dark", hex: "#3a3f4a", surface: "steel-dark" },
+    { role: "metal", hex: "#b9c2cc", surface: "aluminium" },
+    { role: "glass", hex: "#2f4858", surface: "glass" }
   ],
   groups: [{ name: "prop", pivot: [0, 1.1, 3.0] }],
   stages: [
@@ -117,9 +120,14 @@ METHOD (think before you write):
 4. Stages: 1 = primary forms (the silhouette reads from stage 1 alone), 2 = secondary (engines, wheels, roof, limbs), 3+ = tertiary details (trim, windows, struts, lights). 2 to 5 stages, 12 to 80 parts; complex subjects 30+.
 5. Symmetry and arrays: model one side with mirror "x" (wings, wheels, doors, legs, lights), never on a part at x = 0. Rows and rings: repeat (windows, posts, blades, spokes, planks).
 6. Details on a surface (windows, stripes, lights, panels) use the frame of the part they sit on: same at, outline inside its outline, just proud of its surface.
-7. Material zones: 3 to 5 palette roles, soft stylized colors, one accent. Flat shading is the default. Glass: dark tint, rough 0.15, smooth. Metal: metal 0.6, rough 0.35. Lights: emit 1 to 2.
+7. Material zones: 3 to 5 palette roles, each with a surface (SURFACES), one accent. Flat shading is the default. Glass: dark tint, rough 0.15, smooth. Metal: metal 0.6, rough 0.35. Lights: emit 1 to 2.
 8. No voxel look. The subject must never read as a stack of cubes (a block figure, a Minecraft-like model). Round what is round in the real thing: lathe, ellipsoid, capsule, tube, extrude with bevel. A box is right only for a part that is a flat-sided block in the real world, and it gets a bevel or a taper. If more than a third of your parts are boxes, change the organic and curved ones before you submit. Do not model a human or humanoid figure: the library has a rigged one.
-9. Self-check: every part touches another part or the ground; nothing is hidden inside another part or sticks out where it should not; the lowest parts and the wheels touch y = 0; proportions match step 2.
+9. Three scales of form: body; sub-parts of 5 to 50 cm (panels, doors, motors, wheels); fasteners and trim of 0.5 to 3 cm (bolts, hinges, handles, rails, seams) at their true pitch.
+10. Real dimensions: a door is 2 m high, a step 18 cm, a bolt head 1.5 cm. A long part (rail, beam, frame, trim strip) is an extrude of its profile or a lathe, not a box.
+11. One story detail: a cable to a plug, an open hatch, a worn step.
+12. Self-check: every part touches another part or the ground; nothing is hidden inside another part or sticks out where it should not; the lowest parts and the wheels touch y = 0; proportions match step 2.
+
+SURFACES: each palette item names its substance: {role, hex, surface}. Ids: ${surfaceIdList()}. hex tints the first ${SURFACES.filter((x) => x.tint).length} (paint to hull); the others keep their own colors. Code draws grain, chips, rust and dirt and chamfers box and extrude edges: never fake wear, dirt or rust with color spots or extra parts.
 
 SHAPES ("at" = center unless stated):
 box size[x,y,z] bevel? taper?[topX,topZ] (0.6 narrows the top)
@@ -154,7 +162,11 @@ export const SUBMIT_PARTS_TOOL = {
       palette: {
         type: "array",
         description: "3 to 5 color roles and one accent",
-        items: { type: "object", properties: { role: { type: "string" }, hex: { type: "string" } }, required: ["role", "hex"] }
+        items: {
+          type: "object",
+          properties: { role: { type: "string" }, hex: { type: "string" }, surface: { type: "string", enum: [...SURFACE_IDS], description: "The substance of the role" } },
+          required: ["role", "hex"]
+        }
       },
       groups: {
         type: "array",
@@ -223,9 +235,18 @@ export const SUBMIT_PARTS_TOOL = {
 /** A stored spec as the modeler writes one: the palette as a list of roles, one part on each line. */
 export function specForModeler(spec: unknown): string {
   const o = (spec && typeof spec === "object" ? spec : {}) as Record<string, unknown>;
-  const palette = o.palette && typeof o.palette === "object" && !Array.isArray(o.palette) ? Object.entries(o.palette as Record<string, unknown>).map(([role, hex]) => ({ role, hex })) : o.palette;
+  // The stored surfaces map goes back onto the palette items, as the tool schema writes them.
+  const surfaces = (o.surfaces && typeof o.surfaces === "object" ? o.surfaces : {}) as Record<string, unknown>;
+  const palette =
+    o.palette && typeof o.palette === "object" && !Array.isArray(o.palette)
+      ? Object.entries(o.palette as Record<string, unknown>).map(([role, hex]) => ({ role, hex, ...(typeof surfaces[role] === "string" ? { surface: surfaces[role] } : {}) }))
+      : o.palette;
   const groups = o.groups && typeof o.groups === "object" && !Array.isArray(o.groups) ? Object.entries(o.groups as Record<string, unknown>).map(([name, pivot]) => ({ name, pivot })) : o.groups;
-  return compact({ ...o, palette, ...(groups ? { groups } : {}) });
+  // style is not a tool field: the generator sets it from the user's choice.
+  const { surfaces: _s, style: _st, ...rest } = o;
+  void _s;
+  void _st;
+  return compact({ ...rest, palette, ...(groups ? { groups } : {}) });
 }
 
 /** The user message of the modeler call. */

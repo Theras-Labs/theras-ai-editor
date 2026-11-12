@@ -1,6 +1,7 @@
 // Object modeler: parts spec (data written by a model) -> validated, self-checked -> meshes.
 export * from "./spec";
-export { buildParts, partBounds, partInstances, shapeGeometry, type BuildOptions, type BuiltParts } from "./build";
+export { buildParts, defaultBevel, partBounds, partInstances, shapeGeometry, type BuildOptions, type BuiltParts, type MaterialProvider } from "./build";
+export * from "./surfaces";
 export { checkSpec, type CheckReport } from "./check";
 export { EXAMPLE_BIPLANE, EXAMPLE_LAMP, MODELER_SYSTEM_PROMPT, SUBMIT_PARTS_TOOL, modelerUserMessage, specForModeler } from "./prompt";
 

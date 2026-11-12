@@ -8,11 +8,15 @@
 // - The object stands on the ground (lowest point at y = 0) and is centered in x and z.
 // - Staged reveal: `shown` limits the stages; with `reveal` the newest stage grows in with a
 //   scan-line shader (a glowing front that rises through the new parts).
+// - Surfaces: the build is synchronous and flat-colored (it works with no renderer: tests,
+//   thumbnails). applyMaterials() later swaps each bucket to a shader-drawn surface (the port
+//   kit) and turns its vertex colors into shade only, because the tint is then in the material.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { patchWorldMaterial } from "@/vendor/little-habitats/fx/pokefx";
 import { resolveColor, type Axis, type Part, type PartsSpec, type Vec3 } from "./spec";
+import { defaultSurface, type SurfaceId } from "./surfaces";
 
 const DEG = Math.PI / 180;
 
@@ -70,14 +74,50 @@ function extrudeIn(pts: [number, number][], plane: "xy" | "xz" | "zy", depth: nu
   return g;
 }
 
+/**
+ * Chamfer of a box or extrude with no `bevel` in the spec: every box edge that the eye sees has
+ * one (Port props: 3 mm on small parts, 6 to 12 mm on frames, 20 to 30 mm on plinths).
+ * 6% of the thinnest side, 4 mm to 30 mm (spec meters); none under 12 mm, where a chamfer is
+ * smaller than a pixel and only costs triangles.
+ */
+export function defaultBevel(thinnest: number): number {
+  if (!(thinnest >= 0.012)) return 0;
+  return Math.min(0.03, Math.max(0.004, thinnest * 0.06));
+}
+
+/** Thinnest side of an extrude: its depth or the narrow side of its outline. */
+function extrudeThinnest(p: Part): number {
+  const pts = p.outline ?? [];
+  const us = pts.map((q) => q[0]);
+  const vs = pts.map((q) => q[1]);
+  const w = us.length ? Math.max(...us) - Math.min(...us) : 0;
+  const h = vs.length ? Math.max(...vs) - Math.min(...vs) : 0;
+  return Math.min(p.depth ?? 0, w, h);
+}
+
+/** The bevel radius a box is built with (the spec's, or the default chamfer). */
+function boxBevel(p: Part): number {
+  const [x, y, z] = p.size!;
+  const m = Math.min(x, y, z);
+  return Math.min(p.bevel ?? defaultBevel(m), m * 0.49);
+}
+
+/**
+ * True when the shape's own normals must be kept on a flat part: a bevelled box from
+ * RoundedBoxGeometry carries normals that turn across the chamfer, so with one segment the edge
+ * shades as a soft round. A taper moves the vertices and its normals are recomputed flat.
+ */
+function keepsShapeNormals(p: Part): boolean {
+  return p.shape === "box" && !p.taper && boxBevel(p) > 1e-4;
+}
+
 /** Geometry of one part in its own frame (before at / rot / scale). */
 export function shapeGeometry(p: Part): THREE.BufferGeometry {
   const sides = p.sides;
   switch (p.shape) {
     case "box": {
       const [x, y, z] = p.size!;
-      const m = Math.min(x, y, z);
-      const bevel = Math.min(p.bevel ?? m * 0.12, m * 0.49);
+      const bevel = boxBevel(p);
       const g = bevel > 1e-4 ? new RoundedBoxGeometry(x, y, z, 1, bevel) : new THREE.BoxGeometry(x, y, z);
       if (p.taper) {
         const pos = g.attributes.position as THREE.BufferAttribute;
@@ -144,9 +184,8 @@ export function shapeGeometry(p: Part): THREE.BufferGeometry {
       return alongAxis(g, p.axis);
     }
     case "extrude": {
-      const pts = p.outline!;
-      const span = Math.max(...pts.map((q) => Math.abs(q[0])), ...pts.map((q) => Math.abs(q[1])));
-      return extrudeIn(pts, p.plane ?? "xy", p.depth!, p.bevel ?? Math.min(p.depth! * 0.3, span * 0.05));
+      // extrudeIn() also caps the chamfer at 45% of the depth and 20% of the outline span.
+      return extrudeIn(p.outline!, p.plane ?? "xy", p.depth!, p.bevel ?? defaultBevel(extrudeThinnest(p)));
     }
     case "tube": {
       const pts = p.points!.map(([x, y, z]) => new THREE.Vector3(x, y, z));
@@ -332,14 +371,17 @@ function hash01(a: number, b: number, seed: number) {
   return s - Math.floor(s);
 }
 
-/** Writes vertex colors: base color, per-part jitter, top-to-bottom gradient, ground AO. */
-function paint(g: THREE.BufferGeometry, hex: string, jitter: number, groundY: number, aoHeight: number, emissive: boolean) {
+/**
+ * Writes the shade of each vertex (a "shade" attribute, about 0.6 to 1.04): per-part jitter,
+ * top-to-bottom gradient, ground AO. It is kept apart from the color so that the same values
+ * shade a flat color (shade x hex) or a kit surface (shade only; the tint is in the material).
+ */
+function shade(g: THREE.BufferGeometry, jitter: number, groundY: number, aoHeight: number, emissive: boolean) {
   const pos = g.attributes.position as THREE.BufferAttribute;
   g.computeBoundingBox();
   const lo = g.boundingBox!.min.y;
   const span = Math.max(1e-4, g.boundingBox!.max.y - lo);
-  const base = new THREE.Color(hex);
-  const colors = new Float32Array(pos.count * 3);
+  const out = new Float32Array(pos.count);
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
     let f = 1 + jitter;
@@ -348,11 +390,27 @@ function paint(g: THREE.BufferGeometry, hex: string, jitter: number, groundY: nu
       const h = y - groundY;
       if (h < aoHeight) f *= 1 - 0.22 * (1 - Math.max(0, h) / aoHeight);
     }
-    colors[i * 3] = base.r * f;
-    colors[i * 3 + 1] = base.g * f;
-    colors[i * 3 + 2] = base.b * f;
+    out[i] = f;
   }
-  g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  g.setAttribute("shade", new THREE.BufferAttribute(out, 1));
+}
+
+/** Vertex colors of a bucket mesh: shade x hex (flat look) or shade only (kit surface). */
+function writeColors(g: THREE.BufferGeometry, shadeValues: Float32Array, hex: string | null) {
+  const c = hex ? new THREE.Color(hex) : new THREE.Color(1, 1, 1);
+  let attr = g.attributes.color as THREE.BufferAttribute | undefined;
+  if (!attr || attr.count !== shadeValues.length) {
+    attr = new THREE.BufferAttribute(new Float32Array(shadeValues.length * 3), 3);
+    g.setAttribute("color", attr);
+  }
+  const arr = attr.array as Float32Array;
+  for (let i = 0; i < shadeValues.length; i++) {
+    const f = shadeValues[i]!;
+    arr[i * 3] = c.r * f;
+    arr[i * 3 + 1] = c.g * f;
+    arr[i * 3 + 2] = c.b * f;
+  }
+  attr.needsUpdate = true;
 }
 
 // ── Build ─────────────────────────────────────────────────────
@@ -367,6 +425,13 @@ export type BuildOptions = {
   seed?: number;
 };
 
+/**
+ * The material of a surface with a palette color, or null to keep the flat material. The
+ * material is the provider's (shared, cached): the build never disposes it. It must use vertex
+ * colors, which the build sets to shade only.
+ */
+export type MaterialProvider = (surface: SurfaceId, hex: string) => THREE.Material | null;
+
 export type BuiltParts = {
   object: THREE.Group;
   /** Footprint radius in meters (largest distance from the center axis, in x and z). */
@@ -377,14 +442,37 @@ export type BuiltParts = {
   fit: number;
   triangles: number;
   update?: () => void;
+  /**
+   * Swaps each non-emissive mesh to the provider's material for its surface and color, and
+   * rewrites its vertex colors to shade only. A mesh of the stage that is still revealing keeps
+   * the scan-line material and gets the new one when the reveal ends. Returns the number of
+   * meshes that have (or will have) a provider material.
+   */
+  applyMaterials: (provider: MaterialProvider) => number;
   dispose: () => void;
 };
 
-type Bucket = { key: MatKey; group?: string; reveal: boolean; geos: THREE.BufferGeometry[] };
+type Bucket = { key: MatKey; group?: string; reveal: boolean; surface: SurfaceId; hex: string; emissive: boolean; geos: THREE.BufferGeometry[] };
+
+/** A bucket mesh and what is needed to give it another material later. */
+type BucketMesh = {
+  mesh: THREE.Mesh;
+  /** The shared flat material of the bucket's key. */
+  flat: THREE.Material;
+  /** The provider's material, once applyMaterials() gave one. */
+  kit: THREE.Material | null;
+  surface: SurfaceId;
+  hex: string;
+  emissive: boolean;
+  shade: Float32Array;
+  /** True while the mesh shows the scan-line material of the reveal. */
+  revealing: boolean;
+};
 
 /** Builds the object of a validated spec. */
 export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltParts {
   const seed = options.seed ?? 1;
+  const style = spec.style ?? "toy";
   const shown = Math.max(1, Math.min(spec.stages.length, options.shown ?? spec.stages.length));
   const newest = shown - 1;
 
@@ -404,6 +492,9 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
   const offset = new THREE.Vector3(-(bounds.min.x + bounds.max.x) / 2, -bounds.min.y, -(bounds.min.z + bounds.max.z) / 2);
   const aoHeight = 0.18 / fit;
 
+  // One bucket per (pivot group, material key, surface, color, reveal): with a kit surface the
+  // color is in the material, so two colors can no longer share a mesh. The material key holds
+  // the smooth flag, roughness and metalness of the flat look.
   const buckets = new Map<string, Bucket>();
   let footprint = 0;
   const revealBox = new THREE.Box3();
@@ -415,15 +506,24 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
         return;
       }
       const key = matKeyOf(p, spec.palette);
+      const hex = resolveColor(p.color, spec.palette);
+      // A raw "#hex" color has no role, so it gets the default surface of the style.
+      const role = spec.palette[p.color] !== undefined ? p.color : "";
+      const surface = (role && spec.surfaces?.[role]) || defaultSurface(role, hex, style);
+      const emissive = (p.emit ?? 0) > 0;
       const reveal = Boolean(options.reveal) && si === newest;
       const pivot = p.group ? spec.groups?.[p.group] : undefined;
-      const bucketKey = `${p.group ?? ""}|${keyText(key)}|${reveal ? "r" : ""}`;
+      const bucketKey = `${p.group ?? ""}|${keyText(key)}|${surface}|${hex}|${reveal ? "r" : ""}`;
       let bucket = buckets.get(bucketKey);
-      if (!bucket) buckets.set(bucketKey, (bucket = { key, group: pivot ? p.group : undefined, reveal, geos: [] }));
+      if (!bucket) buckets.set(bucketKey, (bucket = { key, group: pivot ? p.group : undefined, reveal, surface, hex, emissive, geos: [] }));
       const jitter = (hash01(si, pi, seed) - 0.5) * 0.08;
+      // Kit surfaces are not flat-shaded: a flat part gets face normals so it keeps its hard
+      // facets. The flat material ignores normals (flatShading), so this changes nothing there.
+      const faceNormals = !p.smooth && !keepsShapeNormals(p);
       for (const g of list) {
+        if (faceNormals) g.computeVertexNormals(); // non-indexed: one normal per face
         g.translate(offset.x, offset.y, offset.z);
-        paint(g, resolveColor(p.color, spec.palette), jitter, 0, aoHeight, (p.emit ?? 0) > 0);
+        shade(g, jitter, 0, aoHeight, emissive);
         g.computeBoundingBox();
         const b = g.boundingBox!;
         footprint = Math.max(footprint, Math.hypot(Math.max(-b.min.x, b.max.x), Math.max(-b.min.z, b.max.z)));
@@ -453,7 +553,7 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
 
   const owned: THREE.BufferGeometry[] = [];
   const revealMats: THREE.Material[] = [];
-  const revealMeshes: { mesh: THREE.Mesh; base: THREE.Material }[] = [];
+  const meshes: BucketMesh[] = [];
   // Same edge color as the editor's build reveal (src/lib/build-reveal.ts).
   const uniforms: RevealUniforms = { uPFront: { value: -1e6 }, uPBand: { value: 0.12 }, uPColor: { value: new THREE.Color("#5cf2b0") } };
   let triangles = 0;
@@ -462,12 +562,16 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
     const merged = bucket.geos.length === 1 ? bucket.geos[0]! : mergeGeometries(bucket.geos);
     if (bucket.geos.length > 1) bucket.geos.forEach((g) => g.dispose());
     if (!merged) continue;
-    if (!bucket.key.flat) merged.computeVertexNormals();
+    // Smooth parts keep the vertex normals of their shapes (no recompute: on non-indexed
+    // geometry computeVertexNormals() would make them face normals).
+    const shadeValues = (merged.attributes.shade as THREE.BufferAttribute).array as Float32Array;
+    merged.deleteAttribute("shade"); // kept on the CPU only; the shader never reads it
+    writeColors(merged, shadeValues, bucket.hex);
     merged.computeBoundingSphere();
     owned.push(merged);
     triangles += merged.attributes.position!.count / 3;
-    const base = baseMaterial(bucket.key);
-    let material = base;
+    const flat = baseMaterial(bucket.key);
+    let material = flat;
     if (bucket.reveal) {
       material = revealMaterial(bucket.key, uniforms);
       revealMats.push(material);
@@ -475,16 +579,25 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
     const mesh = new THREE.Mesh(merged, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    if (bucket.reveal) revealMeshes.push({ mesh, base });
+    meshes.push({ mesh, flat, kit: null, surface: bucket.surface, hex: bucket.hex, emissive: bucket.emissive, shade: shadeValues, revealing: bucket.reveal });
     (bucket.group ? pivotOf(bucket.group) : root).add(mesh);
   }
+
+  /** Puts the final material on a mesh: the provider's (shade-only colors) or the flat one. */
+  const settle = (r: BucketMesh) => {
+    if (r.kit) {
+      r.mesh.material = r.kit;
+      writeColors(r.mesh.geometry, r.shade, null);
+    } else r.mesh.material = r.flat;
+  };
 
   const finalSize: Vec3 = [size.x * fit, size.y * fit, size.z * fit];
   root.userData.footprint = footprint * fit;
   root.userData.partsSize = finalSize;
 
   let update: (() => void) | undefined;
-  if (revealMeshes.length > 0) {
+  const revealing = meshes.filter((r) => r.revealing);
+  if (revealing.length > 0) {
     const start = typeof performance !== "undefined" ? performance.now() : Date.now();
     const pad = 0.04 * (revealBox.max.y - revealBox.min.y) + 0.01;
     const local = revealBox.clone();
@@ -501,7 +614,12 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
       uniforms.uPFront.value = world.min.y - pad * fit + (world.max.y - world.min.y + 2 * pad * fit) * e;
       if (t >= 1) {
         done = true;
-        for (const r of revealMeshes) r.mesh.material = r.base;
+        // The stage ends on the same material as the rest: the provider's if applyMaterials()
+        // ran during the reveal, else the flat one.
+        for (const r of revealing) {
+          r.revealing = false;
+          settle(r);
+        }
         revealMats.forEach((m) => m.dispose());
       }
     };
@@ -515,6 +633,20 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
     fit,
     triangles,
     update,
+    applyMaterials: (provider) => {
+      let n = 0;
+      for (const r of meshes) {
+        // Lamps and screens keep their glow material; a shaded surface would hide the glow.
+        if (r.emissive) continue;
+        const m = provider(r.surface, r.hex);
+        if (m) r.kit = m;
+        if (!r.kit) continue;
+        n++;
+        // A revealing mesh keeps the scan-line material (with its tinted colors) until the end.
+        if (!r.revealing) settle(r);
+      }
+      return n;
+    },
     dispose: () => {
       owned.forEach((g) => g.dispose());
       revealMats.forEach((m) => m.dispose());
