@@ -29,6 +29,7 @@ import {
   type PartsParams,
   type PartsSpec
 } from "@/lib/generators/parts";
+import { settleSize } from "@/lib/generators/parts/real-size";
 import { nodeBatchCommand } from "@/lib/outliner";
 import { LAYOUT_GAP, LAYOUT_MAX_COUNT, findSpots, resolveLayoutAnchor, seededRandom, solveLayout, type LayoutPattern, type PlacementScene } from "@/lib/resources/layout";
 import { placeResource } from "@/lib/resources/place";
@@ -238,7 +239,7 @@ function nextFor(name: string, multi: boolean): NextStep[] {
 export const objectGenerator: Generator = {
   id: "object",
   describe:
-    'ONE object that is NOT in the library (airplane, sports car, market stall, robot, statue, any vehicle, machine or prop). A modeler builds it from shapes. Use only when the library has no such object. params: subject (the object and its key traits), sizeMeters? (longest side; bench 1.2, cottage 4), style? ("toy" | "realistic" | "unsure" = ask the user), colors? (role -> "#hex"). Several of the SAME model: count? (2-24), arrange? ("cluster" | "ring" | "row"), around? (node id), closed? (true = a wall of it, no gaps), vary? (true: plants, rocks). With replace: change? (words for another shape).',
+    'ONE object that is NOT in the library (airplane, sports car, market stall, robot, statue, any vehicle, machine or prop). A modeler builds it from shapes. Use only when the library has no such object. params: subject (the object and its key traits), sizeMeters (REAL longest side: chair 1, car 4.5), style? ("toy" | "realistic" | "unsure" = ask the user), colors? (role -> "#hex"). Several of the SAME model: count? (2-24), arrange? ("cluster" | "ring" | "row"), around? (node id), closed? (true = a wall of it, no gaps), vary? (true: plants, rocks). With replace: change? (words for another shape).',
 
   validate(params, brief) {
     const words = textOf(params.subject, 200) ?? textOf(params.name, 200);
@@ -317,7 +318,13 @@ export const objectGenerator: Generator = {
     const swap = stored ? swapColors(stored.spec, askedColors) : undefined;
     const colorsNeedModeler = Boolean(stored) && Object.keys(askedColors).length > 0 && swap!.roles.length === 0;
     const reuse = Boolean(stored) && !change && !colorsNeedModeler && images.length === 0 && !subjectChanged(String(old?.params.subject ?? ""), subject, `${old?.title ?? ""} ${oldName}`);
-    const asked = typeof params.sizeMeters === "number" ? params.sizeMeters : undefined;
+    // A new object is built at a real size: the director's, or the usual size of that thing
+    // when the director sent none or one that is far off (generators/parts/real-size.ts).
+    const directorSize = typeof params.sizeMeters === "number" ? params.sizeMeters : undefined;
+    const settled = old ? undefined : settleSize({ subject, prompt: ctx.prompt, asked: directorSize });
+    const asked = settled ? settled.meters : directorSize;
+    if (settled?.source === "real") ctx.step("Real size", `${settled.word}: ${settled.meters} m`);
+    else if (settled?.source === "corrected") ctx.step("Real size", `${settled.word}: ${settled.meters} m, not ${r1(directorSize ?? 0)} m`);
     const sizeChanged = asked !== undefined && (oldLongest === undefined || Math.abs(asked - oldLongest) > 0.051);
     /** Longest side in world meters: the asked one, or the present one of the object. */
     const worldLongest = sizeChanged || !old ? asked : oldLongest;

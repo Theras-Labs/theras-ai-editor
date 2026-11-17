@@ -126,7 +126,8 @@ METHOD (think before you write):
 9. Three scales of form: body; sub-parts of 5 to 50 cm (panels, doors, motors, wheels); fasteners and trim of 0.5 to 3 cm (bolts, hinges, handles, rails, seams) at their true pitch.
 10. Real dimensions: a door is 2 m high, a step 18 cm, a bolt head 1.5 cm. A long part (rail, beam, frame, trim strip) is an extrude of its profile or a lathe, not a box.
 11. One story detail: a cable to a plug, an open hatch, a worn step.
-12. Self-check: every part touches another part or the ground; nothing is hidden inside another part or sticks out where it should not; the lowest parts and the wheels touch y = 0; proportions match step 2.
+12. Every side: the object is seen from all sides. Each large face (front, back, left, right, top) carries a sub-part that the real thing has there (door, vent, hatch, filler cap, plate, cable entry, handle, seam). A bare back is a failure.
+13. Self-check: every part touches another part or the ground; nothing is hidden inside another part or sticks out where it should not; the lowest parts and the wheels touch y = 0; proportions match step 2.
 
 SURFACES: each palette item names its substance: {role, hex, surface}. Ids: ${surfaceIdList()}. hex tints the first ${SURFACES.filter((x) => x.tint).length} (paint to hull); the others keep their own colors. Code draws grain, chips, rust and dirt and chamfers box and extrude edges: never fake wear, dirt or rust with color spots or extra parts.
 
@@ -288,7 +289,7 @@ export function modelerUserMessage(input: {
   const lines = [`Subject: ${input.subject}`];
   if (input.prompt && input.prompt !== input.subject) lines.push(`User request: ${input.prompt.slice(0, 400)}`);
   if (input.understanding) lines.push(`Director: ${input.understanding.slice(0, 300)}`);
-  if (input.sizeMeters) lines.push(`Longest side: about ${input.sizeMeters} m (model in real proportions; code scales it).`);
+  if (input.sizeMeters) lines.push(`Longest side: ${input.sizeMeters} m. This is the real size of the object: write size and every part at this size, in real meters.`);
   lines.push(
     input.style === "realistic"
       ? "Style: realistic (true proportions, muted colors, more secondary detail, smooth forms)."
