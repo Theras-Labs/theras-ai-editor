@@ -227,7 +227,23 @@ export function corrugatedGeometry(p: Part): THREE.BufferGeometry {
 
 // ── panel ─────────────────────────────────────────────────────
 
-type Rect = [number, number, number, number]; // x0, y0, x1, y1
+export type Rect = [number, number, number, number]; // x0, y0, x1, y1
+
+/**
+ * Layout of a panel's front face (+z, in the part's own frame): the plane z0, the flat face
+ * inside the chamfer, the margin of the relief and the rectangle that holds the relief. The
+ * frame between `face` and `inner` is flat. panelGeometry() and the bolts of the finish pass
+ * both read it, so a bolt always sits on the flat frame.
+ */
+export function panelFrame(p: Part, bevel: number): { z0: number; b: number; face: Rect; margin: number; inner: Rect } {
+  const [X, Y, Z] = p.size!;
+  const b = bevel > 1e-4 ? Math.min(bevel, X / 2, Y / 2, Z / 2) : 0;
+  const face: Rect = [-X / 2 + b, -Y / 2 + b, X / 2 - b, Y / 2 - b];
+  // The relief keeps a margin off the chamfer, so the chamfer stays a clean frame.
+  const margin = Math.min(Math.max(p.inset ?? Math.min(X, Y) * 0.1, b + 0.002), Math.min(X, Y) * 0.45);
+  const inner: Rect = [-X / 2 + margin, -Y / 2 + margin, X / 2 - margin, Y / 2 - margin];
+  return { z0: Z / 2, b, face, margin, inner };
+}
 
 /**
  * A box whose front face (+z) carries relief: a grid of raised or sunk panels, vertical ribs, or
@@ -236,7 +252,7 @@ type Rect = [number, number, number, number]; // x0, y0, x1, y1
  */
 export function panelGeometry(p: Part, bevel: number): THREE.BufferGeometry {
   const [X, Y, Z] = p.size!;
-  const z0 = Z / 2;
+  const { z0, face, margin, inner } = panelFrame(p, bevel);
   const raw = bevel > 1e-4 ? new RoundedBoxGeometry(X, Y, Z, 1, bevel) : new THREE.BoxGeometry(X, Y, Z);
   // RoundedBoxGeometry is already non-indexed; BoxGeometry is not.
   const body = raw.index ? raw.toNonIndexed() : raw;
@@ -256,11 +272,6 @@ export function panelGeometry(p: Part, bevel: number): THREE.BufferGeometry {
   }
   body.dispose();
 
-  const b = bevel > 1e-4 ? Math.min(bevel, X / 2, Y / 2, Z / 2) : 0;
-  const face: Rect = [-X / 2 + b, -Y / 2 + b, X / 2 - b, Y / 2 - b];
-  // The relief keeps a margin off the chamfer, so the chamfer stays a clean frame.
-  const margin = Math.min(Math.max(p.inset ?? Math.min(X, Y) * 0.1, b + 0.002), Math.min(X, Y) * 0.45);
-  const inner: Rect = [-X / 2 + margin, -Y / 2 + margin, X / 2 - margin, Y / 2 - margin];
   const iw = inner[2] - inner[0];
   const ih = inner[3] - inner[1];
 

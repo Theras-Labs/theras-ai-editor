@@ -2,6 +2,7 @@
 export * from "./spec";
 export { buildParts, defaultBevel, partBounds, partInstances, shapeGeometry, textureScale, type BuildOptions, type BuiltParts, type MaterialProvider } from "./build";
 export * from "./surfaces";
+export { BOLT_TRIANGLES, DENT_SURFACES, FINISH, applyDent, instanceVariety, type Dent } from "./finish";
 export { checkSpec, type CheckReport } from "./check";
 export { EXAMPLE_BIPLANE, EXAMPLE_LAMP, MODELER_SYSTEM_PROMPT, SUBMIT_PARTS_TOOL, modelerUserMessage, specForModeler } from "./prompt";
 

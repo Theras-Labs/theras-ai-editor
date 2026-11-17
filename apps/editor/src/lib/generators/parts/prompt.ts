@@ -129,7 +129,7 @@ METHOD (think before you write):
 12. Every side: the object is seen from all sides. Each large face (front, back, left, right, top) carries a sub-part that the real thing has there (door, vent, hatch, filler cap, plate, cable entry, handle, seam). A bare back is a failure.
 13. Self-check: every part touches another part or the ground; nothing is hidden inside another part or sticks out where it should not; the lowest parts and the wheels touch y = 0; proportions match step 2.
 
-SURFACES: each palette item names its substance: {role, hex, surface}. Ids: ${surfaceIdList()}. hex tints the first ${SURFACES.filter((x) => x.tint).length} (paint to hull); the others keep their own colors. Code draws grain, chips, rust and dirt and chamfers box and extrude edges: never fake wear, dirt or rust with color spots or extra parts.
+SURFACES: each palette item names its substance: {role, hex, surface}. Ids: ${surfaceIdList()}. hex tints the first ${SURFACES.filter((x) => x.tint).length} (paint to hull); the others keep their own colors. Code draws grain, chips, rust and dirt and chamfers box and extrude edges: never fake wear, dirt or rust with color spots or extra parts. On a realistic object code also adds bolts at the corners of each panel, dents in sheet metal and dirt near the ground; model the other fasteners (hinges, handles, latches) yourself.
 
 SHAPES ("at" = center unless stated):
 box size[x,y,z] bevel? taper?[topX,topZ] (0.6 narrows the top)

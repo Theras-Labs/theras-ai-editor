@@ -5,6 +5,8 @@
 // - Vertex colors follow the Island kit look (src/vendor/little-habitats/ecology/meshKit.ts):
 //   a soft top-to-bottom gradient, a small per-part jitter and darkening near the ground,
 //   flat-shaded facets by default.
+// - Realistic objects get the finish pass of finish.ts (gravity shade, copy variety, dents,
+//   bolts) in place of that shade; toy objects and `finish: false` build as before.
 // - The object stands on the ground (lowest point at y = 0) and is centered in x and z.
 // - Staged reveal: `shown` limits the stages; with `reveal` the newest stage grows in with a
 //   scan-line shader (a glowing front that rises through the new parts).
@@ -18,6 +20,7 @@ import { patchWorldMaterial } from "@/vendor/little-habitats/fx/pokefx";
 import { resolveColor, type Axis, type Part, type PartsSpec, type Vec3 } from "./spec";
 import { defaultSurface, type SurfaceId } from "./surfaces";
 import { corrugatedGeometry, latheGeometry, panelGeometry, roundedGeometry, sweepGeometry } from "./builders";
+import { FINISH, finishShade, planFinish, warmTint, type FinishPlan } from "./finish";
 
 const DEG = Math.PI / 180;
 
@@ -416,8 +419,11 @@ function shade(g: THREE.BufferGeometry, jitter: number, groundY: number, aoHeigh
   g.setAttribute("shade", new THREE.BufferAttribute(out, 1));
 }
 
-/** Vertex colors of a bucket mesh: shade x hex (flat look) or shade only (kit surface). */
-function writeColors(g: THREE.BufferGeometry, shadeValues: Float32Array, hex: string | null) {
+/**
+ * Vertex colors of a bucket mesh: shade x hex (flat look) or shade only (kit surface). A
+ * finished build also has `warm` (0..1 per vertex): the warm ground tint multiplies both.
+ */
+function writeColors(g: THREE.BufferGeometry, shadeValues: Float32Array, hex: string | null, warm?: Float32Array) {
   const c = hex ? new THREE.Color(hex) : new THREE.Color(1, 1, 1);
   let attr = g.attributes.color as THREE.BufferAttribute | undefined;
   if (!attr || attr.count !== shadeValues.length) {
@@ -427,6 +433,13 @@ function writeColors(g: THREE.BufferGeometry, shadeValues: Float32Array, hex: st
   const arr = attr.array as Float32Array;
   for (let i = 0; i < shadeValues.length; i++) {
     const f = shadeValues[i]!;
+    if (warm && warm[i]! > 0) {
+      const t = warmTint(warm[i]!);
+      arr[i * 3] = c.r * f * t[0];
+      arr[i * 3 + 1] = c.g * f * t[1];
+      arr[i * 3 + 2] = c.b * f * t[2];
+      continue;
+    }
     arr[i * 3] = c.r * f;
     arr[i * 3 + 1] = c.g * f;
     arr[i * 3 + 2] = c.b * f;
@@ -444,6 +457,11 @@ export type BuildOptions = {
   /** Longest side of the final object in meters (default: the longest side of spec.size). */
   fitSize?: number;
   seed?: number;
+  /**
+   * Finish pass (finish.ts): gravity shade, copy variety, dents and bolts. It runs on realistic
+   * objects only; the default is on for them. false gives the plain build.
+   */
+  finish?: boolean;
 };
 
 /**
@@ -485,7 +503,10 @@ export type BuiltParts = {
   dispose: () => void;
 };
 
-type Bucket = { key: MatKey; group?: string; reveal: boolean; surface: SurfaceId; hex: string; emissive: boolean; geos: THREE.BufferGeometry[] };
+type Bucket = { key: MatKey; group?: string; reveal: boolean; surface: SurfaceId; hex: string; emissive: boolean; geos: THREE.BufferGeometry[]; name?: string };
+
+/** Material key of the bolts of the finish pass: dark steel with a metal look. */
+const BOLT_KEY: MatKey = { flat: true, rough: 0.4, metal: 0.8, emit: 0 };
 
 /** A bucket mesh and what is needed to give it another material later. */
 type BucketMesh = {
@@ -498,6 +519,8 @@ type BucketMesh = {
   hex: string;
   emissive: boolean;
   shade: Float32Array;
+  /** Finished builds only: the warm ground tint of each vertex (0..1). */
+  warm?: Float32Array;
   /** True while the mesh shows the scan-line material of the reveal. */
   revealing: boolean;
 };
@@ -524,6 +547,18 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
   const fit = Math.min(20, Math.max(0.02, target / longest));
   const offset = new THREE.Vector3(-(bounds.min.x + bounds.max.x) / 2, -bounds.min.y, -(bounds.min.z + bounds.max.z) / 2);
   const aoHeight = 0.18 / fit;
+  const finished = style === "realistic" && options.finish !== false;
+  /** The surface of a part: the spec's for its role, else the default of the style. */
+  const surfaceOf = (p: Part): SurfaceId => {
+    const hex = resolveColor(p.color, spec.palette);
+    // A raw "#hex" color has no role, so it gets the default surface of the style.
+    const role = spec.palette[p.color] !== undefined ? p.color : "";
+    return (role && spec.surfaces?.[role]) || defaultSurface(role, hex, style);
+  };
+  // The finish plan reads every copy of every stage, so it is made before unshown stages are freed.
+  const plan: FinishPlan | null = finished
+    ? planFinish(spec, { fit, seed, groundY: bounds.min.y, perPart, matricesOf: partMatrices, surfaceOf, bevelOf: boxBevel })
+    : null;
 
   // One bucket per (pivot group, material key, surface, color, reveal): with a kit surface the
   // color is in the material, so two colors can no longer share a mesh. The material key holds
@@ -540,9 +575,7 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
       }
       const key = matKeyOf(p, spec.palette);
       const hex = resolveColor(p.color, spec.palette);
-      // A raw "#hex" color has no role, so it gets the default surface of the style.
-      const role = spec.palette[p.color] !== undefined ? p.color : "";
-      const surface = (role && spec.surfaces?.[role]) || defaultSurface(role, hex, style);
+      const surface = surfaceOf(p);
       const emissive = (p.emit ?? 0) > 0;
       const reveal = Boolean(options.reveal) && si === newest;
       const pivot = p.group ? spec.groups?.[p.group] : undefined;
@@ -553,17 +586,40 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
       // Kit surfaces are not flat-shaded: a flat part gets face normals so it keeps its hard
       // facets. The flat material ignores normals (flatShading), so this changes nothing there.
       const faceNormals = !p.smooth && !keepsShapeNormals(p);
-      for (const g of list) {
-        if (faceNormals) g.computeVertexNormals(); // non-indexed: one normal per face
+      /** Moves a copy to the ground, shades it and puts it in its bucket. */
+      const place = (g: THREE.BufferGeometry, into: Bucket, shadeIt: (g: THREE.BufferGeometry) => void) => {
         g.translate(offset.x, offset.y, offset.z);
-        shade(g, jitter, 0, aoHeight, emissive);
+        shadeIt(g);
         g.computeBoundingBox();
         const b = g.boundingBox!;
         footprint = Math.max(footprint, Math.hypot(Math.max(-b.min.x, b.max.x), Math.max(-b.min.z, b.max.z)));
         if (reveal) revealBox.union(b);
         if (pivot) g.translate(-(pivot[0] + offset.x), -(pivot[1] + offset.y), -(pivot[2] + offset.z));
-        bucket.geos.push(g);
-      }
+        into.geos.push(g);
+      };
+      list.forEach((g0, j) => {
+        let g = g0;
+        if (faceNormals) g.computeVertexNormals(); // non-indexed: one normal per face
+        if (!plan) {
+          place(g, bucket, (h) => shade(h, jitter, 0, aoHeight, emissive));
+          return;
+        }
+        const fin = plan.instance(si, pi, j, p, g);
+        g = fin.geometry;
+        const common = { fit, height: size.y, seed, bright: fin.bright };
+        place(g, bucket, (h) => finishShade(h, { ...common, jitter, emissive }));
+        if (fin.bolts) {
+          // The bolts of a panel: same pivot group and stage as the panel, a bucket of their own.
+          const boltKey = `${p.group ?? ""}|${keyText(BOLT_KEY)}|${FINISH.boltSurface}|${FINISH.boltHex}|${reveal ? "r" : ""}|bolts`;
+          let bolts = buckets.get(boltKey);
+          if (!bolts)
+            buckets.set(
+              boltKey,
+              (bolts = { key: BOLT_KEY, group: pivot ? p.group : undefined, reveal, surface: FINISH.boltSurface, hex: FINISH.boltHex, emissive: false, geos: [], name: "bolts" })
+            );
+          place(fin.bolts, bolts, (h) => finishShade(h, { ...common, jitter: 0, emissive: false }));
+        }
+      });
     });
   });
 
@@ -599,7 +655,9 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
     // geometry computeVertexNormals() would make them face normals).
     const shadeValues = (merged.attributes.shade as THREE.BufferAttribute).array as Float32Array;
     merged.deleteAttribute("shade"); // kept on the CPU only; the shader never reads it
-    writeColors(merged, shadeValues, bucket.hex);
+    const warm = merged.attributes.warm ? ((merged.attributes.warm as THREE.BufferAttribute).array as Float32Array) : undefined;
+    if (warm) merged.deleteAttribute("warm");
+    writeColors(merged, shadeValues, bucket.hex, warm);
     merged.computeBoundingSphere();
     owned.push(merged);
     triangles += merged.attributes.position!.count / 3;
@@ -610,9 +668,10 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
       revealMats.push(material);
     }
     const mesh = new THREE.Mesh(merged, material);
+    if (bucket.name) mesh.name = bucket.name;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    meshes.push({ mesh, flat, kit: null, surface: bucket.surface, hex: bucket.hex, emissive: bucket.emissive, shade: shadeValues, revealing: bucket.reveal });
+    meshes.push({ mesh, flat, kit: null, surface: bucket.surface, hex: bucket.hex, emissive: bucket.emissive, shade: shadeValues, warm, revealing: bucket.reveal });
     (bucket.group ? pivotOf(bucket.group) : root).add(mesh);
   }
 
@@ -620,13 +679,14 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
   const settle = (r: BucketMesh) => {
     if (r.kit) {
       r.mesh.material = r.kit;
-      writeColors(r.mesh.geometry, r.shade, null);
+      writeColors(r.mesh.geometry, r.shade, null, r.warm);
     } else r.mesh.material = r.flat;
   };
 
   const finalSize: Vec3 = [size.x * fit, size.y * fit, size.z * fit];
   root.userData.footprint = footprint * fit;
   root.userData.partsSize = finalSize;
+  if (plan) root.userData.finish = { dents: plan.dents, bolts: plan.bolts };
 
   let update: (() => void) | undefined;
   const revealing = meshes.filter((r) => r.revealing);
