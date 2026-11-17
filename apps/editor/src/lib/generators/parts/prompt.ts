@@ -7,6 +7,7 @@
 // examples are original. The SURFACES and QUALITY rules follow the port kit's prop and weapon
 // principles (src/lib/resources/port/kit.ts): real dimensions, three scales of form, profiles
 // for long parts, one story detail; code adds chamfers and wear.
+import { PART_SHAPES } from "./spec";
 import { SURFACES, SURFACE_IDS, surfaceIdList } from "./surfaces";
 
 /** A street lamp: lathe base, tapered post, radial repeat, emissive glass, mirrored tubes. */
@@ -137,9 +138,13 @@ cylinder r h r2?(top radius) axis? sides? bend?(degrees toward +x) (sides 6 = he
 cone r h axis? (tip toward +axis)
 capsule r h axis?
 torus r t(tube radius) axis?(hole axis) arc?(degrees; 180 = arch). Wheel on an x axle: axis "x".
-lathe profile[[radius, along],...] axis? ("along" relative to at). Fuselage: axis "z", tail first, nose last.
-extrude outline[[u,v],...] plane depth bevel? (outline relative to at). "xz" = top view (u=x, v=z; thickness along y): wings, tailplane. "zy" = side view (u=z, v=y; thickness along x): fin, keel, car body, gable. "xy" = front view (thickness along z): signs, gears, arches. Half wing: outline from u=0 (root) to a narrower, swept tip, then mirror "x"; dihedral rot [0,0,3].
+lathe profile[[radius, along],...] (up to 32) axis? ("along" relative to at). Fuselage: axis "z", tail first, nose last. Repeat a point twice for a hard edge (drum hoop, rim); smooth: true rounds the rest.
+extrude outline[[u,v],...] plane depth bevel? holes?[[[u,v],...],...] (outline relative to at; holes are real openings: put a dark part behind one so it reads as an opening). "xz" = top view (u=x, v=z; thickness along y): wings, tailplane. "zy" = side view (u=z, v=y; thickness along x): fin, keel, car body, gable. "xy" = front view (thickness along z): signs, gears, arches. Half wing: outline from u=0 (root) to a narrower, swept tip, then mirror "x"; dihedral rot [0,0,3].
 tube points[[x,y,z],...] r (pipe through points relative to at, rounded ends)
+sweep profile[[u,v],...](closed section) axis length stations?[[t 0..1, scale or [su,sv], [du,dv]?],...]: section along the axis; axis "x": u = z, v = y; "z": u = x, v = y; "y": u = x, v = z. Barrier, car body, hull, beam, tapered post. Section corners over 30 degrees stay hard.
+corrugated size[width,height] depth axis(facing, default "z") pitch?(0.278) flat?(0.26) slope?(0.24): trapezoid sheet; container walls, roofing, shutters.
+panel size[x,y,z] bevel? cols? rows? inset? relief?(+ raised, - sunk) | ribs relief? | louvres tilt?: box with relief on its +z face (rot turns it). Doors, cabinets, covers, vents.
+rounded size[x,y,z] radius dish?: box rounded on every edge; dish dips the top (seat, lid).
 Every part: name, color (palette role or #hex), rot[x,y,z] degrees (after axis; rot x +a tips the +z end DOWN, rot z +a lifts the +x end, rot y +a turns +z toward +x; a gable roof is a triangle extrude, not two guessed rotations), scale?, rough?, metal?, emit?, smooth?, mirror? "x"|"z", repeat? {n, step[x,y,z]} or {n, radial "x"|"y"|"z", center[x,y,z]} (copies turn about the axis through center), group? (defined in groups with a pivot: propeller, wheel, door).
 
 EXAMPLE 1 (style reference only; never copy it for another subject):
@@ -186,7 +191,7 @@ export const SUBMIT_PARTS_TOOL = {
                 type: "object",
                 properties: {
                   name: { type: "string" },
-                  shape: { type: "string", enum: ["box", "wedge", "ellipsoid", "cylinder", "cone", "capsule", "torus", "lathe", "extrude", "tube"] },
+                  shape: { type: "string", enum: [...PART_SHAPES] },
                   at: VEC3,
                   rot: VEC3,
                   scale: VEC3,
@@ -207,6 +212,25 @@ export const SUBMIT_PARTS_TOOL = {
                   plane: { type: "string", enum: ["xy", "xz", "zy"] },
                   depth: { type: "number" },
                   points: { type: "array", items: VEC3 },
+                  holes: { type: "array", items: VEC2_LIST, description: "extrude: inner outlines cut through the part" },
+                  length: { type: "number" },
+                  stations: {
+                    type: "array",
+                    description: "sweep: [t, scale or [su, sv], [du, dv]?]",
+                    items: { type: "array", items: { anyOf: [{ type: "number" }, { type: "array", items: { type: "number" } }] } }
+                  },
+                  pitch: { type: "number" },
+                  flat: { type: "number" },
+                  slope: { type: "number" },
+                  cols: { type: "number" },
+                  rows: { type: "number" },
+                  inset: { type: "number" },
+                  relief: { type: "number" },
+                  ribs: { type: "number" },
+                  louvres: { type: "number" },
+                  tilt: { type: "number" },
+                  radius: { type: "number" },
+                  dish: { type: "number" },
                   color: { type: "string" },
                   rough: { type: "number" },
                   metal: { type: "number" },

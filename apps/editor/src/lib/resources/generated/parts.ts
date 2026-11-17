@@ -11,11 +11,15 @@ import type { ResourceEntry, ResourceFrame } from "../types";
 
 /** Port materials for the parts surfaces. Kit materials are shared and cached: never dispose. */
 function kitProvider(kit: PortKit): MaterialProvider {
-  return (surface, hex) => {
+  return (surface, hex, texScale) => {
     const def = surfaceDef(surface);
     return kit.ctx.mats.get(def.preset, {
       // Object space mapping: the parts have no UVs.
       triplanar: true,
+      // The kit's triplanar shader samples at (object position x scale / tile meters). The
+      // positions are in spec units and the object is scaled by `fit` after the build, so
+      // scale = fit (texScale) makes one tile the same number of meters on any object size.
+      scale: texScale,
       // The vertex color carries the shade (gradient, ground AO, jitter) only.
       vertexColors: true,
       // A wrong outline winding never makes a part disappear (as with the flat material).

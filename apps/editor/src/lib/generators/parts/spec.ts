@@ -8,7 +8,22 @@ import { isSurfaceId, type ObjectStyle, type SurfaceId } from "./surfaces";
 export type Vec3 = [number, number, number];
 export type Axis = "x" | "y" | "z";
 
-export const PART_SHAPES = ["box", "wedge", "ellipsoid", "cylinder", "cone", "capsule", "torus", "lathe", "extrude", "tube"] as const;
+export const PART_SHAPES = [
+  "box",
+  "wedge",
+  "ellipsoid",
+  "cylinder",
+  "cone",
+  "capsule",
+  "torus",
+  "lathe",
+  "extrude",
+  "tube",
+  "sweep",
+  "corrugated",
+  "panel",
+  "rounded"
+] as const;
 export type PartShape = (typeof PART_SHAPES)[number];
 
 export type PartRepeat = {
@@ -22,6 +37,12 @@ export type PartRepeat = {
   center?: Vec3;
 };
 
+/**
+ * sweep: one section of the path. t = 0..1 along the length; scale of the profile (one number,
+ * or [su, sv]); offset [du, dv] of the section in the profile plane.
+ */
+export type SweepStation = { t: number; s: [number, number]; d: [number, number] };
+
 export type Part = {
   name?: string;
   shape: PartShape;
@@ -30,7 +51,10 @@ export type Part = {
   /** Euler XYZ rotation in degrees, applied after `axis`. */
   rot?: Vec3;
   scale?: Vec3;
-  /** box, wedge, ellipsoid: full extents [x, y, z]. */
+  /**
+   * box, wedge, ellipsoid, panel, rounded: full extents [x, y, z].
+   * corrugated: [width, height, depth of the wave] (the model writes [width, height] and `depth`).
+   */
   size?: Vec3;
   /** cylinder, cone, capsule: bottom radius. torus: ring radius. tube: tube radius. */
   r?: number;
@@ -40,11 +64,14 @@ export type Part = {
   h?: number;
   /** torus: tube radius. */
   t?: number;
-  /** Long axis of cylinder, cone, capsule, lathe; hole axis of torus. Default "y". */
+  /**
+   * Long axis of cylinder, cone, capsule, lathe; hole axis of torus; path of sweep. Default "y".
+   * corrugated: the direction the sheet faces; always stored (default "z").
+   */
   axis?: Axis;
   /** Radial segments (3 = triangular prism, 6 = hex). */
   sides?: number;
-  /** box, wedge, extrude: rounded edge radius. */
+  /** box, wedge, extrude, panel: rounded edge radius. */
   bevel?: number;
   /** box: scale of the top face [x, z] (1 = straight sides). */
   taper?: [number, number];
@@ -54,14 +81,46 @@ export type Part = {
   arc?: number;
   /** ellipsoid: part of the height cut flat from the bottom, 0..0.9 (0.5 = dome). */
   clip?: number;
-  /** lathe: [radius, position along the axis] from one end to the other. */
+  /**
+   * lathe: [radius, position along the axis] from one end to the other; two equal consecutive
+   * points make a hard edge. sweep: the closed section [u, v] across the path.
+   */
   profile?: [number, number][];
   /** extrude: 2D outline points in `plane`. */
   outline?: [number, number][];
+  /** extrude: inner outlines (same plane) cut through the part. */
+  holes?: [number, number][][];
   /** extrude: plane of the outline; the thickness goes along the third axis. Default "xy". */
   plane?: "xy" | "xz" | "zy";
-  /** extrude: thickness. */
+  /** extrude: thickness. corrugated: depth of the wave. */
   depth?: number;
+  /** sweep: length of the path along `axis`, centered on `at`. */
+  length?: number;
+  /** sweep: sections along the path, sorted by t; the first is at t = 0 and the last at t = 1. */
+  stations?: SweepStation[];
+  /** corrugated: length of one wave along the width (default 0.278 m, an ISO container side). */
+  pitch?: number;
+  /** corrugated: outer flat of one wave, as a fraction of the pitch. */
+  flat?: number;
+  /** corrugated: run of one slope, as a fraction of the pitch. */
+  slope?: number;
+  /** panel: grid of raised or sunk panels on the front face. */
+  cols?: number;
+  rows?: number;
+  /** panel: margin around the relief and the width of the stiles between panels. */
+  inset?: number;
+  /** panel: height of the panels or ribs above the front face (negative = sunk). */
+  relief?: number;
+  /** panel: number of vertical ribs (replaces the grid). */
+  ribs?: number;
+  /** panel: number of louvre slats (replaces the grid and the ribs). */
+  louvres?: number;
+  /** panel: tilt of the louvre slats in degrees. */
+  tilt?: number;
+  /** rounded: corner radius of every edge. */
+  radius?: number;
+  /** rounded: depth of a cosine dip in the top face (seat, lid). */
+  dish?: number;
   /** tube: polyline points, relative to `at`. */
   points?: Vec3[];
   /** Palette role or "#rrggbb". */
@@ -105,8 +164,16 @@ export const LIMITS = {
   maxParts: 80,
   maxStages: 5,
   maxInstances: 480,
-  maxProfile: 24,
+  maxProfile: 32,
   maxOutline: 48,
+  maxHoles: 8,
+  maxStations: 12,
+  /** corrugated: waves per sheet (a 12 m container side has 43). */
+  maxWaves: 200,
+  /** panel: columns and rows of the grid. */
+  maxCells: 8,
+  /** panel: ribs or louvre slats. */
+  maxSlats: 40,
   maxPoints: 16,
   coord: 60,
   minDim: 0.002,
@@ -327,6 +394,82 @@ function partOf(raw: unknown, palette: Record<string, string>, groups: Record<st
       p.depth = pos(numIn(o.depth, m, D), 0.05);
       const bevel = numIn(o.bevel, 0, D);
       if (bevel !== undefined) p.bevel = bevel;
+      const holes = holesOf(o.holes, outline, issues, where);
+      if (holes.length) p.holes = holes;
+      break;
+    }
+    case "sweep": {
+      const profile = vec2List(o.profile, LIMITS.maxProfile, -C, C);
+      const length = numIn(o.length, m, D);
+      if (!profile || profile.length < 3 || polygonArea(profile) < m * m || length === undefined) {
+        issues.push(`${where}: sweep needs a closed profile of 3+ points with area and a length, dropped`);
+        return null;
+      }
+      p.profile = profile;
+      p.length = length;
+      const stations = stationsOf(o.stations);
+      if (stations) p.stations = stations;
+      break;
+    }
+    case "corrugated": {
+      const w = Array.isArray(o.size) ? numIn(o.size[0], m, D) : undefined;
+      const h = Array.isArray(o.size) ? numIn(o.size[1], m, D) : undefined;
+      if (w === undefined || h === undefined) {
+        issues.push(`${where}: corrugated needs size [width, height], dropped`);
+        return null;
+      }
+      // The facing axis is stored even when it is "y" (a roof), because its default is "z".
+      p.axis = axisOf(o.axis) ?? "z";
+      // Default numbers: ISO container side wall, 278 mm pitch, 36 mm deep, 72 mm outer flat, 68 mm slope.
+      const depth = pos(numIn(o.depth, m, D), 0.036);
+      p.size = [w, h, depth];
+      p.depth = depth;
+      // A pitch under width / maxWaves would make more strips than a sheet needs.
+      const pitch = numIn(o.pitch, Math.max(m * 4, w / LIMITS.maxWaves), D);
+      if (pitch !== undefined) p.pitch = pitch;
+      const flat = numIn(o.flat, 0, 0.45);
+      const slope = numIn(o.slope, 0.02, 0.45);
+      if (flat !== undefined) p.flat = flat;
+      if (slope !== undefined) p.slope = slope;
+      break;
+    }
+    case "panel":
+    case "rounded": {
+      const size = vec3(o.size, m, D);
+      if (!size) {
+        issues.push(`${where}: ${shape} needs size [x,y,z], dropped`);
+        return null;
+      }
+      p.size = size;
+      if (shape === "rounded") {
+        // The radius is the rounding: no bevel on top of it.
+        const radius = numIn(o.radius ?? o.bevel, 0, D);
+        if (radius !== undefined) p.radius = Math.min(radius, Math.min(...size) / 2);
+        const dish = numIn(o.dish, 0, D);
+        if (dish) p.dish = Math.min(dish, size[1] * 0.45);
+        break;
+      }
+      const bevel = numIn(o.bevel, 0, D);
+      if (bevel !== undefined) p.bevel = bevel;
+      const count = (v: unknown, max: number) => {
+        const n = num(v);
+        return n === undefined ? undefined : Math.round(clamp(n, 1, max));
+      };
+      const cols = count(o.cols, LIMITS.maxCells);
+      const rows = count(o.rows, LIMITS.maxCells);
+      const ribs = count(o.ribs, LIMITS.maxSlats);
+      const louvres = count(o.louvres ?? o.louvers, LIMITS.maxSlats);
+      if (cols !== undefined) p.cols = cols;
+      if (rows !== undefined) p.rows = rows;
+      if (ribs !== undefined) p.ribs = ribs;
+      if (louvres !== undefined) p.louvres = louvres;
+      const inset = numIn(o.inset, 0, Math.min(size[0], size[1]) * 0.45);
+      if (inset !== undefined) p.inset = inset;
+      // A sunk relief keeps 20% of the slab behind it.
+      const relief = numIn(o.relief, -size[2] * 0.8, D);
+      if (relief !== undefined) p.relief = relief;
+      const tilt = numIn(o.tilt, 10, 70);
+      if (tilt !== undefined) p.tilt = tilt;
       break;
     }
     case "tube": {
@@ -368,6 +511,67 @@ function partOf(raw: unknown, palette: Record<string, string>, groups: Record<st
   // A group used without a pivot gets one after all parts are read (validateSpec).
   if (typeof o.group === "string" && o.group.trim()) p.group = o.group.trim().slice(0, 32);
   return p;
+}
+
+/** Even-odd test of a point in a polygon. */
+export function pointInPolygon(x: number, y: number, pts: [number, number][]) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i]!;
+    const [xj, yj] = pts[j]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** extrude holes: 3+ points with area, center inside the outline; others are dropped. */
+function holesOf(v: unknown, outline: [number, number][], issues: SpecIssue[], where: string): [number, number][][] {
+  if (!Array.isArray(v)) return [];
+  const out: [number, number][][] = [];
+  for (const raw of v.slice(0, LIMITS.maxHoles)) {
+    const hole = vec2List(raw, LIMITS.maxOutline, -LIMITS.coord, LIMITS.coord);
+    const cx = hole ? hole.reduce((n, q) => n + q[0], 0) / hole.length : 0;
+    const cy = hole ? hole.reduce((n, q) => n + q[1], 0) / hole.length : 0;
+    if (!hole || hole.length < 3 || polygonArea(hole) < LIMITS.minDim * LIMITS.minDim || !pointInPolygon(cx, cy, outline)) {
+      issues.push(`${where}: a hole is not a 3+ point outline inside the part, dropped`);
+      continue;
+    }
+    out.push(hole);
+  }
+  return out;
+}
+
+/**
+ * sweep stations: [t, scale, [du, dv]?] with scale a number or [su, sv] (also accepted:
+ * {t, scale, offset}). Sorted by t; the ends are extended to t = 0 and t = 1.
+ */
+function stationsOf(v: unknown): SweepStation[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: SweepStation[] = [];
+  for (const raw of v.slice(0, LIMITS.maxStations)) {
+    const r: Record<string, unknown> | null = Array.isArray(raw)
+      ? { t: raw[0], scale: raw[1], offset: raw[2] }
+      : raw && typeof raw === "object"
+        ? (raw as Record<string, unknown>)
+        : null;
+    if (!r) continue;
+    const t = numIn(r.t, 0, 1);
+    if (t === undefined) continue;
+    const sc = r.scale ?? r.s ?? 1;
+    const su = numIn(Array.isArray(sc) ? sc[0] : sc, 0.01, 20) ?? 1;
+    const sv = numIn(Array.isArray(sc) ? sc[1] : sc, 0.01, 20) ?? su;
+    const off = r.offset ?? r.d;
+    const du = Array.isArray(off) ? (numIn(off[0], -LIMITS.coord, LIMITS.coord) ?? 0) : 0;
+    const dv = Array.isArray(off) ? (numIn(off[1], -LIMITS.coord, LIMITS.coord) ?? 0) : 0;
+    out.push({ t, s: [su, sv], d: [du, dv] });
+  }
+  if (out.length === 0) return undefined;
+  out.sort((a, b) => a.t - b.t);
+  if (out[0]!.t > 0) out.unshift({ ...out[0]!, t: 0 });
+  if (out[out.length - 1]!.t < 1) out.push({ ...out[out.length - 1]!, t: 1 });
+  // Two stations at one t would make a zero-length band; the later one wins.
+  const dedup = out.filter((st, i) => i === out.length - 1 || out[i + 1]!.t - st.t > 1e-6);
+  return dedup.length >= 2 ? dedup : undefined;
 }
 
 export function polygonArea(pts: [number, number][]) {

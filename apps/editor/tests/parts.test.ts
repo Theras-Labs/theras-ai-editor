@@ -49,7 +49,11 @@ const ONE_OF_EACH: Record<string, Record<string, unknown>> = {
   torus: { shape: "torus", at: [0, 0.5, 0], r: 0.4, t: 0.1, arc: 180, axis: "x", color: "body" },
   lathe: { shape: "lathe", at: [0, 0, 0], axis: "z", profile: [[0.1, -1], [0.4, 0], [0.2, 1]], color: "body" },
   extrude: { shape: "extrude", at: [0, 0.5, 0], plane: "xz", outline: [[0, -0.5], [2, -0.3], [2, 0.3], [0, 0.5]], depth: 0.1, color: "body" },
-  tube: { shape: "tube", at: [0, 0, 0], points: [[0, 0, 0], [0.5, 0.5, 0], [1, 0.6, 0.2]], r: 0.05, color: "dark" }
+  tube: { shape: "tube", at: [0, 0, 0], points: [[0, 0, 0], [0.5, 0.5, 0], [1, 0.6, 0.2]], r: 0.05, color: "dark" },
+  sweep: { shape: "sweep", at: [0, 0.5, 0], axis: "x", length: 1, profile: [[-0.2, -0.3], [0.2, -0.3], [0.1, 0.3], [-0.1, 0.3]], stations: [[0, 0.9], [0.5, 1.1], [1, 0.9]], color: "body" },
+  corrugated: { shape: "corrugated", at: [0, 0.5, 0], size: [1.2, 1], depth: 0.036, color: "body" },
+  panel: { shape: "panel", at: [0, 0.5, 0], size: [0.8, 1, 0.05], cols: 2, rows: 2, relief: -0.01, color: "body" },
+  rounded: { shape: "rounded", at: [0, 0.5, 0], size: [0.6, 0.2, 0.6], radius: 0.05, dish: 0.03, color: "body" }
 };
 
 describe("validation", () => {

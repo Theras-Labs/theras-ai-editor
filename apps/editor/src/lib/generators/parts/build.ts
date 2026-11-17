@@ -17,6 +17,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { patchWorldMaterial } from "@/vendor/little-habitats/fx/pokefx";
 import { resolveColor, type Axis, type Part, type PartsSpec, type Vec3 } from "./spec";
 import { defaultSurface, type SurfaceId } from "./surfaces";
+import { corrugatedGeometry, latheGeometry, panelGeometry, roundedGeometry, sweepGeometry } from "./builders";
 
 const DEG = Math.PI / 180;
 
@@ -47,19 +48,31 @@ function bendY(g: THREE.BufferGeometry, h: number, deg: number) {
   return g;
 }
 
-function outlineShape(pts: [number, number][]) {
+function closedPoints(pts: [number, number][]) {
   const clean = pts.slice();
   const a = clean[0]!;
   const b = clean[clean.length - 1]!;
   if (clean.length > 3 && Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6) clean.pop();
-  return new THREE.Shape(clean.map(([x, y]) => new THREE.Vector2(x, y)));
+  return clean.map(([x, y]) => new THREE.Vector2(x, y));
 }
 
-/** Extrudes a 2D outline in `plane`, centered on the thickness. */
-function extrudeIn(pts: [number, number][], plane: "xy" | "xz" | "zy", depth: number, bevel: number) {
+function outlineShape(pts: [number, number][], holes: [number, number][][] = []) {
+  const shape = new THREE.Shape(closedPoints(pts));
+  // A hole is a real opening through the part (ExtrudeGeometry walls it on the inside).
+  for (const h of holes) shape.holes.push(new THREE.Path(closedPoints(h)));
+  return shape;
+}
+
+/** Extrudes a 2D outline (with optional holes) in `plane`, centered on the thickness. */
+function extrudeIn(pts: [number, number][], plane: "xy" | "xz" | "zy", depth: number, bevel: number, holes: [number, number][][] = []) {
   const span = Math.max(...pts.map((p) => Math.abs(p[0])), ...pts.map((p) => Math.abs(p[1])), 0.01);
-  const b = Math.min(bevel, depth * 0.45, span * 0.2);
-  const g = new THREE.ExtrudeGeometry(outlineShape(pts), {
+  // A chamfer wider than a fifth of the smallest hole would close it up.
+  const holeSpan = Math.min(
+    Infinity,
+    ...holes.map((h) => Math.min(Math.max(...h.map((q) => q[0])) - Math.min(...h.map((q) => q[0])), Math.max(...h.map((q) => q[1])) - Math.min(...h.map((q) => q[1]))))
+  );
+  const b = Math.min(bevel, depth * 0.45, span * 0.2, holeSpan * 0.2);
+  const g = new THREE.ExtrudeGeometry(outlineShape(pts, holes), {
     depth: Math.max(0.001, depth - 2 * b),
     bevelEnabled: b > 1e-4,
     bevelThickness: b,
@@ -106,9 +119,12 @@ function boxBevel(p: Part): number {
  * True when the shape's own normals must be kept on a flat part: a bevelled box from
  * RoundedBoxGeometry carries normals that turn across the chamfer, so with one segment the edge
  * shades as a soft round. A taper moves the vertices and its normals are recomputed flat.
+ * A panel keeps its chamfer the same way; a rounded box keeps its round; a sweep keeps its
+ * crease normals (hard where the section turns more than 30 degrees, soft elsewhere).
  */
 function keepsShapeNormals(p: Part): boolean {
-  return p.shape === "box" && !p.taper && boxBevel(p) > 1e-4;
+  if (p.shape === "rounded" || p.shape === "sweep") return true;
+  return (p.shape === "box" && !p.taper && boxBevel(p) > 1e-4) || (p.shape === "panel" && boxBevel(p) > 1e-4);
 }
 
 /** Geometry of one part in its own frame (before at / rot / scale). */
@@ -175,18 +191,23 @@ export function shapeGeometry(p: Part): THREE.BufferGeometry {
       return g;
     }
     case "lathe": {
-      let prof = p.profile!.slice();
-      if (prof[0]![1] > prof[prof.length - 1]![1]) prof = prof.reverse();
-      const pts = prof.map(([r, y]) => new THREE.Vector2(Math.max(0, r), y));
-      if (pts[0]!.x > 1e-4) pts.unshift(new THREE.Vector2(0, pts[0]!.y));
-      if (pts[pts.length - 1]!.x > 1e-4) pts.push(new THREE.Vector2(0, pts[pts.length - 1]!.y));
-      const g = new THREE.LatheGeometry(pts, sides ?? 14);
-      return alongAxis(g, p.axis);
+      // Own lathe (not THREE.LatheGeometry): a doubled profile point must split the normals.
+      return alongAxis(latheGeometry(p.profile!, sides ?? 14), p.axis);
     }
     case "extrude": {
       // extrudeIn() also caps the chamfer at 45% of the depth and 20% of the outline span.
-      return extrudeIn(p.outline!, p.plane ?? "xy", p.depth!, p.bevel ?? defaultBevel(extrudeThinnest(p)));
+      return extrudeIn(p.outline!, p.plane ?? "xy", p.depth!, p.bevel ?? defaultBevel(extrudeThinnest(p)), p.holes);
     }
+    case "sweep":
+      return sweepGeometry(p);
+    case "corrugated":
+      return corrugatedGeometry(p);
+    case "panel":
+      // Same chamfer rule as a box: the spec's bevel, else the default chamfer.
+      return panelGeometry(p, boxBevel(p));
+    case "rounded":
+      // The radius is the rounding: no default chamfer on top of it.
+      return roundedGeometry(p);
     case "tube": {
       const pts = p.points!.map(([x, y, z]) => new THREE.Vector3(x, y, z));
       const r = p.r!;
@@ -429,8 +450,20 @@ export type BuildOptions = {
  * The material of a surface with a palette color, or null to keep the flat material. The
  * material is the provider's (shared, cached): the build never disposes it. It must use vertex
  * colors, which the build sets to shade only.
+ * `texScale` is the scale for an object-space (triplanar) texture: the mesh positions are in
+ * spec units and the object is scaled by `fit` afterwards, so one spec unit is `fit` meters.
+ * A triplanar texture with scale = fit therefore tiles in real meters on the final object.
  */
-export type MaterialProvider = (surface: SurfaceId, hex: string) => THREE.Material | null;
+export type MaterialProvider = (surface: SurfaceId, hex: string, texScale: number) => THREE.Material | null;
+
+/**
+ * The triplanar texture scale of a build: `fit` (meters per spec unit), rounded to two
+ * significant digits (at most 5% off). The kit caches one material per scale, so an exact
+ * float would make a new material for nearly every object.
+ */
+export function textureScale(fit: number): number {
+  return Number(fit.toPrecision(2));
+}
 
 export type BuiltParts = {
   object: THREE.Group;
@@ -638,7 +671,7 @@ export function buildParts(spec: PartsSpec, options: BuildOptions = {}): BuiltPa
       for (const r of meshes) {
         // Lamps and screens keep their glow material; a shaded surface would hide the glow.
         if (r.emissive) continue;
-        const m = provider(r.surface, r.hex);
+        const m = provider(r.surface, r.hex, textureScale(fit));
         if (m) r.kit = m;
         if (!r.kit) continue;
         n++;
